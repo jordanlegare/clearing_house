@@ -1,38 +1,49 @@
 # Canadian Philanthropy Clearing House
 
-A **ChatGPT plugin-compatible MCP app/backend** for turning Canadian foundation disbursement capacity into discoverable, auditable matches with registered charities—without making frontline organizations repeatedly search and apply for the same capital.
+A **ChatGPT plugin-compatible MCP app/backend** for routing Canadian foundation disbursement capacity toward registered charities and other eligible recipients with less application overhead and stronger auditability.
 
-The project ingests public **CRA T3010 List of charities** data from Open Government Canada and exposes it to ChatGPT through a Streamable HTTP MCP server.
+The project combines public **CRA T3010 / List of charities** data from Open Government Canada with an opt-in authenticated grant workflow.
 
 ## What works now
 
-- Discover the CRA T3010 CSV resources from Open Government Canada's public CKAN catalogue.
-- Stream and normalize Identification, financials, programs, qualified/non-qualified donees, foundations, **Schedule 8 DQ**, and web-address data.
-- Preserve all source columns while adding a stable BN-based envelope.
-- Search Canadian registered charities and foundations.
-- Fetch a filing-derived charity/foundation profile by stable id.
-- Return a foundation's published Schedule 8 DQ fields without pretending to make a legal determination.
-- Match foundation filing/history evidence to charities with transparent matched terms.
-- Model the `$135B × 8.5% return × 5% DQ` scenario and the `87,000 + 20%` recipient-universe scenario.
-- Estimate administrative hours recovered across nonprofits, foundations and government.
-- Expose all of the above through ChatGPT-compatible MCP tools at `/mcp`.
-- Enforce a production requirements layer covering runtime readiness, RBAC, grant-state transitions, CRA reporting classification, safe notification/payment adapters and a PostgreSQL workflow schema.
+### Public discovery
 
-**No payment rail executes money. No tool autonomously awards or transfers foundation funds.**
+- Discover and stream the current CRA T3010 CSV resources from Open Government Canada's CKAN catalogue.
+- Normalize identification, financials, programs, qualified/non-qualified donees, foundations, Schedule 8 DQ, and web-address data.
+- Search/fetch charities and foundations and match foundation filing evidence to candidate recipients with transparent reasons.
+- Model DQ/capital scenarios and administrative-capacity savings.
 
-## ChatGPT Plugins / Apps compatibility
+### Authenticated workflow
 
-As of July 2026, OpenAI's Plugin Directory is the discovery/package layer. A plugin can include one or more apps, skills, and app templates; an **app** remains the integration that connects ChatGPT to external data and actions. This repository implements that underlying MCP app/backend.
+With `ENABLE_WORKFLOW_WRITES=1`, PostgreSQL + OIDC/OAuth + encryption/audit keys configured:
 
-To use it in ChatGPT:
+- organization-scoped RBAC;
+- recipient and foundation profile claims against loaded T3010 records;
+- controlled system-admin verification and role assignment;
+- grant draft/proposal/approval/offer/acceptance lifecycle;
+- versioned recipient consent;
+- current CRA List-of-Charities status observations for release gating;
+- independent compliance review;
+- manual/external payment authorization and payment-reference recording;
+- encrypted SMS/voice notification outbox with Twilio worker support;
+- T3010/T1441 reporting-package preparation;
+- idempotent writes and HMAC-chained audit records.
 
-1. deploy this service to a remotely reachable HTTPS host;
-2. create a custom app in ChatGPT developer mode using the deployed `/mcp` endpoint and scan its tools;
-3. configure OAuth/OIDC before exposing authenticated write actions;
-4. test and publish the app for the intended workspace;
-5. create/import/submit or otherwise make available the containing plugin when Plugin Directory distribution is desired.
+**The app still cannot execute a bank transfer.** Payment remains an externally executed/manual operation that the clearing house can authorize and record.
 
-A remote MCP app does not, by itself, create a Plugin Directory listing. The repository therefore does **not** invent an obsolete `ai-plugin.json` manifest or a proprietary plugin package format that OpenAI does not document for this flow.
+## ChatGPT compatibility
+
+This repository implements the MCP app/backend used by a ChatGPT custom app/plugin. Deploy it to a remotely reachable HTTPS endpoint, configure OAuth/OIDC, scan the `/mcp` tools in ChatGPT developer mode, test the write actions, and publish only after workspace review.
+
+When OAuth is used, configure the provider for refresh tokens / `offline_access`; otherwise ChatGPT can lose connectivity after the original access token expires.
+
+The server publishes protected-resource metadata at:
+
+```text
+/.well-known/oauth-protected-resource
+```
+
+and returns a bearer authentication challenge when authenticated workflow mode is enabled.
 
 ## Quick start
 
@@ -44,104 +55,77 @@ npm run ingest:t3010 -- --year 2024
 npm start
 ```
 
-Then verify:
-
-```bash
-curl http://localhost:3000/healthz
-```
-
-MCP endpoint:
+Public MCP endpoint:
 
 ```text
 http://localhost:3000/mcp
 ```
 
-ChatGPT itself requires a remotely reachable endpoint (or an approved secure tunnel), not a bare localhost endpoint.
+## Database
 
-## Production readiness
-
-Copy `.env.example`, then configure the deployment. Workflow writes are **disabled by default** and must remain disabled until the production gates are met.
+Apply migrations in order:
 
 ```bash
-cp .env.example .env
-npm run readiness
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f db/migrations/001_core.sql
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f db/migrations/002_workflow_runtime.sql
 ```
 
-The production baseline requires:
+The CI suite applies both migrations against PostgreSQL 16 and runs an end-to-end workflow smoke.
 
-- HTTPS public endpoint
-- PostgreSQL-compatible durable persistence
-- OAuth/OIDC identity for workflow actors
-- organization-scoped RBAC and separation of duties
-- versioned recipient consent
-- fresh recipient-status verification before payment authorization
-- append-only/tamper-evident audit records
-- idempotency for grant, notification and payment events
-- operator privacy/security program
-- safe notification provider configuration
-- payment execution outside the baseline app (`disabled` or `manual` adapter only)
+## Bootstrap the first administrator
 
-The deterministic grant lifecycle is:
+The first global administrator is an operator bootstrap, not an AI action:
+
+```bash
+DATABASE_URL=postgres://... \
+BOOTSTRAP_ADMIN_SUBJECT='<exact OIDC sub>' \
+BOOTSTRAP_ADMIN_EMAIL='admin@example.ca' \
+npm run bootstrap:admin
+```
+
+In production also provide:
 
 ```text
-draft -> proposed -> approved -> offered -> accepted
-      -> payment_authorized -> paid -> reported
+BOOTSTRAP_ADMIN_CONFIRM=BOOTSTRAP <exact OIDC sub>
 ```
 
-`declined` and `cancelled` are terminal exception states.
+After that, organization claims and role grants can be handled through authenticated MCP tools.
 
-See [docs/PRODUCTION_REQUIREMENTS.md](docs/PRODUCTION_REQUIREMENTS.md), [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md), and [docs/OPERATIONS.md](docs/OPERATIONS.md).
+## Notification worker
 
-## Fast T3010 smoke ingest
+Grant offers may queue `sms` or `voice` notifications. Destinations are encrypted in PostgreSQL. Configure Twilio and run the worker from a scheduler/queue runner:
 
 ```bash
-npm run ingest:t3010 -- --year 2024 \
-  --resources identification,foundations,disbursement_quota \
-  --max-rows 100 --output .tmp/t3010-smoke
+NOTIFICATION_PROVIDER=twilio \
+TWILIO_ACCOUNT_SID=... \
+TWILIO_AUTH_TOKEN=... \
+TWILIO_FROM_NUMBER=... \
+npm run dispatch:notifications
 ```
 
-A full default ingest streams nine public resources and writes normalized JSONL under `data/t3010/2024/`. Data files are ignored by git; the application should ingest them into persistent deployment storage rather than vendoring CRA data into the source repository.
+The worker uses row locking to avoid two workers claiming the same queued message. The model does not get arbitrary direct-message capability.
 
 ## MCP tools
 
-| Tool | Purpose |
-|---|---|
-| `dataset_status` | Show loaded CRA T3010 dataset/version/counts |
-| `search` | Conventional cross-entity search returning stable fetch ids |
-| `fetch` | Fetch a charity/foundation profile by id |
-| `search_charities` | Mission/geography search across T3010 charities |
-| `search_foundations` | Foundation search with filing/history evidence |
-| `get_foundation_dq_record` | Return published Schedule 8 DQ fields |
-| `match_foundation_recipients` | Transparent foundation→charity matching |
-| `calculate_foundation_dq` | Planning-level DQ scenario calculation |
-| `model_foundation_capital` | Multi-year return/disbursement model |
-| `national_allocation_scenario` | `$135B / 8.5% / 5% / 104,400` scenario engine |
-| `estimate_admin_capacity_saved` | Nonprofit/foundation/government time-savings model |
-| `sync_t3010` | Optional, explicitly confirmed Open Canada→local data synchronization (`ENABLE_T3010_SYNC=1`) |
-| `open_canada_catalogue` | Source metadata/status |
+Public tools remain available in read-only mode:
 
-Write/modify grant tools are intentionally **not** exposed yet. The new workflow/RBAC/schema code establishes the requirements those tools must satisfy before they can be safely enabled.
+`dataset_status`, `search`, `fetch`, `search_charities`, `search_foundations`, `get_foundation_dq_record`, `match_foundation_recipients`, `calculate_foundation_dq`, `model_foundation_capital`, `national_allocation_scenario`, `estimate_admin_capacity_saved`, `open_canada_catalogue`, plus optional `sync_t3010`.
 
-## CRA reporting boundary
+Authenticated workflow mode adds:
 
-The compliance module distinguishes qualified donees from non-qualified donees. For non-qualified donees, it aggregates grants to the same grantee across the fiscal period before applying the current CRA reporting threshold. Exact T3010/T1441 field mappings must remain versioned to the filing package in force.
+`workflow_whoami`, `workflow_list_grants`, `workflow_get_grant`, `claim_recipient_organization`, `claim_foundation_organization`, `verify_organization_claim`, `grant_organization_role`, `create_grant`, `propose_grant`, `approve_grant`, `offer_grant`, `accept_grant`, `decline_grant`, `record_cra_status_verification`, `review_grant_compliance`, `authorize_manual_payment`, `record_manual_payment`, `prepare_reporting_record`, and `mark_grant_reported`.
 
-T3010 data remains public/self-reported filing data and is not treated as a live legal-status guarantee. A current status check is required before payment authorization in the workflow model.
+## Safety boundaries
 
-## Safety and compliance boundaries
+- T3010 data is public/self-reported filing data, not a live legal-status guarantee.
+- Matching is discovery, not an award or CRA determination.
+- Retrieved text never determines authorization.
+- Foundation roles are organization scoped.
+- Proposer/approver separation is enforced server-side.
+- Recipient acceptance is explicit and versioned.
+- Payment authorization requires current authoritative status evidence and compliance approval.
+- Notification addresses/numbers are encrypted at rest in the application layer.
+- No banking credentials or transfer API are present in the baseline implementation.
+- CRA reporting records are review artifacts; the app does not submit returns or claim acceptance.
 
-- Matching is discovery, not an award, CRA approval, or impact determination.
-- DQ calculations are planning scenarios unless statutory inputs/rules are independently verified.
-- The default importer excludes directors/officers.
-- Public deployments are read-only by default. `sync_t3010` is exposed only with `ENABLE_T3010_SYNC=1` and then requires an exact confirmation string before writing local data.
-- Retrieved/public text never determines authorization; RBAC and state transitions are server-side code requirements.
-- Recipient consent is required before payment authorization.
-- No banking credentials are required by the baseline architecture.
-
-## Sources
-
-- CRA T3010 / List of charities: Open Government Canada
-- Default 2024 dataset id: `80c00cdb-1358-415c-bb8b-0de7f12675b8`
-- Open Government Canada CKAN API: `https://open.canada.ca/data/api/3/action`
-
-See [docs/T3010.md](docs/T3010.md), [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md), [docs/PRODUCTION_REQUIREMENTS.md](docs/PRODUCTION_REQUIREMENTS.md), and [PRIVACY.md](PRIVACY.md).
+See [docs/WORKFLOW.md](docs/WORKFLOW.md), [docs/PRODUCTION_REQUIREMENTS.md](docs/PRODUCTION_REQUIREMENTS.md), [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md), [docs/OPERATIONS.md](docs/OPERATIONS.md), [docs/T3010.md](docs/T3010.md), and [PRIVACY.md](PRIVACY.md).
