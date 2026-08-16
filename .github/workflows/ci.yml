@@ -16,7 +16,7 @@ jobs:
       - run: npm install
       - run: npm run check
       - run: npm test
-      - name: MCP server startup smoke
+      - name: MCP protocol smoke
         shell: bash
         run: |
           PORT=3100 npm start > /tmp/clearing-house.log 2>&1 &
@@ -24,10 +24,9 @@ jobs:
           trap 'kill $pid 2>/dev/null || true' EXIT
           for i in {1..20}; do
             if curl -fsS http://127.0.0.1:3100/healthz > /tmp/health.json; then
-              cat /tmp/health.json
-              exit 0
+              break
             fi
             sleep 0.5
           done
-          cat /tmp/clearing-house.log
-          exit 1
+          cat /tmp/health.json
+          MCP_URL=http://127.0.0.1:3100/mcp node scripts/mcp-client-smoke.mjs
