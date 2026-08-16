@@ -96,13 +96,27 @@ FOR EACH ROW EXECUTE FUNCTION enforce_nqd_diligence_before_compliance();
 
 CREATE OR REPLACE FUNCTION enforce_payment_operator_separation()
 RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE
+  effective_creator uuid;
 BEGIN
   IF NEW.authorized_by IS NOT NULL
-     AND (OLD.authorized_by IS DISTINCT FROM NEW.authorized_by OR TG_OP = 'INSERT') THEN
-    IF NEW.created_by IS NULL THEN
+     AND (TG_OP = 'INSERT' OR OLD.authorized_by IS DISTINCT FROM NEW.authorized_by) THEN
+    effective_creator := NEW.created_by;
+
+    -- The current repository authorizes with INSERT ... ON CONFLICT DO UPDATE.
+    -- On the BEFORE INSERT phase, NEW is the proposed conflict row and therefore
+    -- does not carry the existing intent's created_by. Consult the existing row
+    -- so the creator/authorizer gate applies before conflict resolution as well.
+    IF effective_creator IS NULL AND TG_OP = 'INSERT' THEN
+      SELECT p.created_by INTO effective_creator
+      FROM payment_intents p
+      WHERE p.grant_id = NEW.grant_id;
+    END IF;
+
+    IF effective_creator IS NULL THEN
       RAISE EXCEPTION 'payment intent must be created by an operator before authorization';
     END IF;
-    IF NEW.created_by = NEW.authorized_by THEN
+    IF effective_creator = NEW.authorized_by THEN
       RAISE EXCEPTION 'payment intent creator cannot authorize the same payment';
     END IF;
     IF NOT EXISTS (
