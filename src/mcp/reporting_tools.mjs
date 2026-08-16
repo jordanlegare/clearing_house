@@ -5,6 +5,10 @@ import {
   previewFiscalReportingPackage,
   setGrantReportingMetadata
 } from '../compliance/fiscal_package.mjs';
+import {
+  getFiscalReportingSubmission,
+  recordFiscalReportingSubmission
+} from '../compliance/fiscal_closeout.mjs';
 
 const readOnly = { readOnlyHint: true, openWorldHint: false, destructiveHint: false };
 const consequential = { readOnlyHint: false, openWorldHint: false, destructiveHint: true };
@@ -70,5 +74,28 @@ export function registerFiscalReportingTools(server, { repository, actor }) {
     annotations: readOnly
   }, async ({ packageId }) => result('Loaded the prepared fiscal reporting package.', {
     package: await getFiscalReportingPackage(repository, actor, packageId)
+  }));
+
+  server.registerTool('record_fiscal_reporting_submission', {
+    title: 'Close out externally filed fiscal reporting package',
+    description: 'After an authorized foundation user has actually filed through CRA or CRA-certified software, record the external submission reference and atomically reconcile every grant in the unchanged package from paid to reported. This tool does not contact CRA and does not claim CRA acceptance.',
+    inputSchema: {
+      packageId: uuid,
+      externalSubmissionReference: z.string().min(1).max(500),
+      submittedAt: z.string().datetime().optional(),
+      idempotencyKey: z.string().min(8).max(200)
+    },
+    annotations: consequential
+  }, async args => result('Recorded the external filing reference and closed out the unchanged fiscal package. This records submission evidence only; it does not claim CRA acceptance.', {
+    submission: await recordFiscalReportingSubmission(repository, actor, args)
+  }));
+
+  server.registerTool('get_fiscal_reporting_submission', {
+    title: 'Get fiscal filing closeout record',
+    description: 'Retrieve the organization-scoped external filing reference recorded for a prepared fiscal reporting package. This is read-only and represents recorded submission evidence, not CRA acceptance.',
+    inputSchema: { packageId: uuid },
+    annotations: readOnly
+  }, async ({ packageId }) => result('Loaded the fiscal filing closeout record.', {
+    submission: await getFiscalReportingSubmission(repository, actor, packageId)
   }));
 }

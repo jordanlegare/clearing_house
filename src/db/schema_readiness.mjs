@@ -16,7 +16,8 @@ export const REQUIRED_SCHEMA_OBJECTS = Object.freeze([
   'recipient_contact_discovery',
   'grant_reporting_metadata',
   'grant_reporting_metadata_commands',
-  'fiscal_reporting_packages'
+  'fiscal_reporting_packages',
+  'fiscal_reporting_submissions'
 ]);
 
 export async function checkDatabaseSchema(pool) {
