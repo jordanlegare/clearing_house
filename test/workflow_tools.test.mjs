@@ -9,6 +9,7 @@ test('authenticated workflow exposes explicit, permission-separable MCP actions'
   for (const name of [
     'workflow_whoami','build_allocation_portfolio','create_portfolio_drafts',
     'create_allocation_policy','list_allocation_policies','update_allocation_policy','set_allocation_policy_enabled','run_allocation_policy_now',
+    'suggest_dq_allocation_envelope','create_dq_backed_allocation_policy','get_dq_policy_basis',
     'claim_recipient_organization','claim_foundation_organization','verify_organization_claim',
     'grant_organization_role','create_grant','propose_grant','approve_grant','offer_grant','accept_grant',
     'check_cra_public_evidence','record_cra_status_verification','prepare_nqd_diligence','get_nqd_diligence',
@@ -18,8 +19,11 @@ test('authenticated workflow exposes explicit, permission-separable MCP actions'
   assert.equal(tools.get('workflow_whoami').spec.annotations.readOnlyHint, true);
   assert.equal(tools.get('build_allocation_portfolio').spec.annotations.readOnlyHint, true);
   assert.equal(tools.get('list_allocation_policies').spec.annotations.readOnlyHint, true);
+  assert.equal(tools.get('suggest_dq_allocation_envelope').spec.annotations.readOnlyHint, true);
+  assert.equal(tools.get('get_dq_policy_basis').spec.annotations.readOnlyHint, true);
   assert.equal(tools.get('create_portfolio_drafts').spec.annotations.destructiveHint, true);
   assert.equal(tools.get('create_allocation_policy').spec.annotations.destructiveHint, true);
+  assert.equal(tools.get('create_dq_backed_allocation_policy').spec.annotations.destructiveHint, true);
   assert.equal(tools.get('run_allocation_policy_now').spec.annotations.destructiveHint, true);
   assert.equal(tools.get('check_cra_public_evidence').spec.annotations.openWorldHint, true);
   assert.equal(tools.get('create_grant').spec.annotations.readOnlyHint, false);

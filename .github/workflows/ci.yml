@@ -60,23 +60,20 @@ jobs:
               psql -h 127.0.0.1 -U postgres -d clearing_house_test -v ON_ERROR_STOP=1 -f "$migration"
           done
       - name: Workflow database end-to-end smoke
-        env:
+        env: &db-env
           DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/clearing_house_test
           ENCRYPTION_KEY: eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
           AUDIT_HMAC_KEY: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
         run: npm run test:db
       - name: Recipient no-account offer lifecycle smoke
-        env:
-          DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/clearing_house_test
-          ENCRYPTION_KEY: eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
-          AUDIT_HMAC_KEY: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+        env: *db-env
         run: npm run test:portal-db
       - name: Autonomous allocation policy database smoke
-        env:
-          DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/clearing_house_test
-          ENCRYPTION_KEY: eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
-          AUDIT_HMAC_KEY: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+        env: *db-env
         run: npm run test:allocation-policy-db
+      - name: DQ-backed envelope database smoke
+        env: *db-env
+        run: npm run test:dq-envelope-db
       - name: Autonomous worker single-cycle smoke
         env:
           DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/clearing_house_test
