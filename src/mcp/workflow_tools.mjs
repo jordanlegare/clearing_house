@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { buildFoundationPortfolio, materializePortfolioDrafts } from '../workflow/portfolio_workflow.mjs';
 
 const readOnly = { readOnlyHint: true, openWorldHint: false, destructiveHint: false };
 const write = { readOnlyHint: false, openWorldHint: false, destructiveHint: false };
@@ -30,6 +31,37 @@ export function registerWorkflowTools(server, { service, actor }) {
     description: 'Fetch an authenticated grant workflow record, including current terms, compliance decision and authoritative recipient-status evidence when available.',
     inputSchema: { grantId: uuid }, annotations: readOnly
   }, async ({ grantId }) => result('Returned grant workflow record.', { grant: await service.getGrant(actor, grantId) }));
+
+  server.registerTool('build_allocation_portfolio', {
+    title: 'Build foundation allocation portfolio',
+    description: 'Build a read-only recipient allocation plan from a foundation’s T3010 evidence and explicit budget/grant constraints. It reports any unallocated remainder and does not create grants or awards.',
+    inputSchema: {
+      foundationOrgId: uuid,
+      budgetCad: z.number().positive().max(10_000_000_000),
+      focus: z.string().max(5_000).default(''),
+      province: z.string().max(3).default(''),
+      minGrantCad: z.number().positive().max(10_000_000_000).default(25_000),
+      maxGrantCad: z.number().positive().max(10_000_000_000).default(250_000),
+      maxRecipients: z.number().int().min(1).max(500).default(100),
+      minimumScore: z.number().min(0).max(1_000_000).default(0),
+      purpose: z.string().min(3).max(10_000).default('General operating support')
+    }, annotations: readOnly
+  }, async args => result('Built a planning allocation portfolio. No grant drafts or awards were created.', { portfolio: await buildFoundationPortfolio(service, actor, args) }));
+
+  server.registerTool('create_portfolio_drafts', {
+    title: 'Create grant drafts from approved portfolio',
+    description: 'Create idempotent grant drafts for the explicitly supplied portfolio allocations after verifying the plan hash and recipient BNs against the loaded registered-charity T3010 dataset. This creates drafts only; it does not propose, approve, offer, notify, or pay.',
+    inputSchema: {
+      foundationOrgId: uuid,
+      purpose: z.string().min(3).max(10_000),
+      allocations: z.array(z.object({
+        businessNumber: z.string().min(9).max(20),
+        amountCad: z.number().positive().max(10_000_000_000)
+      })).min(1).max(500),
+      planHash: z.string().regex(/^[a-f0-9]{64}$/),
+      idempotencyKey
+    }, annotations: consequential
+  }, async args => result('Created grant drafts from the approved allocation plan. No grants were proposed, approved, offered, or paid.', { portfolioDrafts: await materializePortfolioDrafts(service, actor, args) }));
 
   server.registerTool('claim_recipient_organization', {
     title: 'Claim a registered charity profile',
