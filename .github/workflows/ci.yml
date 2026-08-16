@@ -69,6 +69,13 @@ jobs:
           ENCRYPTION_KEY: eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
           AUDIT_HMAC_KEY: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
         run: npm run test:db
+      - name: Autonomous worker single-cycle smoke
+        env:
+          DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/clearing_house_test
+          AUTOMATION_ENABLED: "1"
+          ENABLE_T3010_SYNC: "0"
+          NOTIFICATION_PROVIDER: disabled
+        run: npm run ops:once
       - name: MCP public protocol smoke
         shell: bash
         run: |

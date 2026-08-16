@@ -32,9 +32,15 @@ export function loadRuntimeConfig(env = process.env) {
     twilioFromNumber: env.TWILIO_FROM_NUMBER || '',
     enableWorkflowWrites: bool(env.ENABLE_WORKFLOW_WRITES, false),
     enableT3010Sync: bool(env.ENABLE_T3010_SYNC, false),
+    automationEnabled: bool(env.AUTOMATION_ENABLED, false),
     craStatusMaxAgeHours: positiveInt(env.CRA_STATUS_MAX_AGE_HOURS, 24),
     retentionDays: positiveInt(env.RETENTION_DAYS, 2555),
     notificationBatchSize: positiveInt(env.NOTIFICATION_BATCH_SIZE, 25),
+    notificationPollSeconds: positiveInt(env.NOTIFICATION_POLL_SECONDS, 30),
+    automationPollSeconds: positiveInt(env.AUTOMATION_POLL_SECONDS, 10),
+    automationLeaseSeconds: positiveInt(env.AUTOMATION_LEASE_SECONDS, 300),
+    t3010SyncIntervalHours: positiveInt(env.T3010_SYNC_INTERVAL_HOURS, 24),
+    t3010AutoReloadSeconds: positiveInt(env.T3010_AUTO_RELOAD_SECONDS, 300),
     requireSeparationOfDuties: bool(env.REQUIRE_SEPARATION_OF_DUTIES, true)
   };
 }
@@ -54,24 +60,19 @@ export function assessReadiness(config) {
     if (config.notificationProvider === 'console') blockers.push('Console notifications are not permitted in production.');
   }
 
-  if (!['disabled', 'console', 'twilio'].includes(config.notificationProvider)) {
-    blockers.push(`Unsupported NOTIFICATION_PROVIDER: ${config.notificationProvider}`);
-  }
-  if (!['disabled', 'manual'].includes(config.paymentProvider)) {
-    blockers.push(`Unsupported PAYMENT_PROVIDER: ${config.paymentProvider}`);
-  }
+  if (config.automationEnabled && !config.databaseUrl) blockers.push('DATABASE_URL is required when autonomous operations are enabled.');
+  if (!['disabled', 'console', 'twilio'].includes(config.notificationProvider)) blockers.push(`Unsupported NOTIFICATION_PROVIDER: ${config.notificationProvider}`);
+  if (!['disabled', 'manual'].includes(config.paymentProvider)) blockers.push(`Unsupported PAYMENT_PROVIDER: ${config.paymentProvider}`);
   if (config.notificationProvider === 'twilio') {
     if (!config.twilioAccountSid) blockers.push('TWILIO_ACCOUNT_SID is required for Twilio notifications.');
     if (!config.twilioAuthToken) blockers.push('TWILIO_AUTH_TOKEN is required for Twilio notifications.');
     if (!config.twilioFromNumber) blockers.push('TWILIO_FROM_NUMBER is required for Twilio notifications.');
     if (config.encryptionKey.length < 32) blockers.push('ENCRYPTION_KEY is required to encrypt notification recipients.');
   }
-  if (config.enableWorkflowWrites && config.paymentProvider === 'disabled') {
-    warnings.push('Workflow writes are enabled while payments are disabled; grants can progress only to acceptance/compliance workflows.');
-  }
-  if (config.enableWorkflowWrites && config.notificationProvider === 'disabled') {
-    warnings.push('Workflow writes are enabled while notifications are disabled; offers must be surfaced through another recipient channel.');
-  }
+  if (config.enableWorkflowWrites && config.paymentProvider === 'disabled') warnings.push('Workflow writes are enabled while payments are disabled; grants can progress only to acceptance/compliance workflows.');
+  if (config.enableWorkflowWrites && config.notificationProvider === 'disabled') warnings.push('Workflow writes are enabled while notifications are disabled; offers must be surfaced through another recipient channel.');
+  if (config.automationEnabled && config.notificationProvider === 'disabled') warnings.push('Autonomous operations are enabled but recipient notifications are disabled.');
+  if (config.enableT3010Sync && !config.automationEnabled) warnings.push('T3010 synchronization is enabled but autonomous operations are off; refreshes require a manual sync action.');
   if (config.craStatusMaxAgeHours > 72) warnings.push('CRA status verification age exceeds 72 hours; consider a tighter release-time verification window.');
   if (config.retentionDays < 2190) warnings.push('Retention is under six years; verify CRA books-and-records requirements for each record class before production use.');
 

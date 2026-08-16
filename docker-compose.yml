@@ -1,0 +1,89 @@
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: clearing_house
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d clearing_house"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+  migrate:
+    image: postgres:16
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    volumes:
+      - ./:/work:ro
+    working_dir: /work
+    command: >-
+      sh -c 'for migration in db/migrations/*.sql; do
+      echo "Applying $$migration";
+      psql -h postgres -U postgres -d clearing_house -v ON_ERROR_STOP=1 -f "$$migration";
+      done'
+    restart: "no"
+
+  app:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    ports:
+      - "${PORT:-3000}:3000"
+    environment: &app-env
+      NODE_ENV: ${NODE_ENV:-development}
+      PORT: 3000
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:3000}
+      DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/clearing_house
+      T3010_YEAR: ${T3010_YEAR:-2024}
+      T3010_DATA_DIR: /app/data/t3010/${T3010_YEAR:-2024}
+      ENABLE_T3010_SYNC: ${ENABLE_T3010_SYNC:-1}
+      T3010_SYNC_INTERVAL_HOURS: ${T3010_SYNC_INTERVAL_HOURS:-24}
+      T3010_AUTO_RELOAD_SECONDS: ${T3010_AUTO_RELOAD_SECONDS:-300}
+      AUTOMATION_ENABLED: ${AUTOMATION_ENABLED:-1}
+      AUTOMATION_POLL_SECONDS: ${AUTOMATION_POLL_SECONDS:-10}
+      AUTOMATION_LEASE_SECONDS: ${AUTOMATION_LEASE_SECONDS:-300}
+      ENABLE_WORKFLOW_WRITES: ${ENABLE_WORKFLOW_WRITES:-0}
+      OIDC_ISSUER: ${OIDC_ISSUER:-}
+      OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-}
+      OIDC_AUDIENCE: ${OIDC_AUDIENCE:-}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-}
+      AUDIT_HMAC_KEY: ${AUDIT_HMAC_KEY:-}
+      NOTIFICATION_PROVIDER: ${NOTIFICATION_PROVIDER:-disabled}
+      NOTIFICATION_BATCH_SIZE: ${NOTIFICATION_BATCH_SIZE:-25}
+      NOTIFICATION_POLL_SECONDS: ${NOTIFICATION_POLL_SECONDS:-30}
+      TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID:-}
+      TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN:-}
+      TWILIO_FROM_NUMBER: ${TWILIO_FROM_NUMBER:-}
+      PAYMENT_PROVIDER: ${PAYMENT_PROVIDER:-disabled}
+      CRA_STATUS_MAX_AGE_HOURS: ${CRA_STATUS_MAX_AGE_HOURS:-24}
+      REQUIRE_SEPARATION_OF_DUTIES: ${REQUIRE_SEPARATION_OF_DUTIES:-1}
+      RETENTION_DAYS: ${RETENTION_DAYS:-2555}
+    volumes:
+      - t3010-data:/app/data/t3010
+
+  worker:
+    build: .
+    command: npm run ops:worker
+    restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      <<: *app-env
+      AUTOMATION_WORKER_ID: ${AUTOMATION_WORKER_ID:-primary-worker}
+    volumes:
+      - t3010-data:/app/data/t3010
+
+volumes:
+  postgres-data:
+  t3010-data:

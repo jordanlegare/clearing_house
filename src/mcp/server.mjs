@@ -27,6 +27,21 @@ const repository = new T3010Repository(dataDir);
 let loadError = null;
 try { await repository.load(); } catch (error) { loadError = error; }
 
+let reloadInFlight = false;
+const reloadTimer = setInterval(async () => {
+  if (reloadInFlight) return;
+  reloadInFlight = true;
+  try {
+    await repository.load({ force: true });
+    loadError = null;
+  } catch (error) {
+    loadError = error;
+  } finally {
+    reloadInFlight = false;
+  }
+}, config.t3010AutoReloadSeconds * 1000);
+reloadTimer.unref();
+
 const pool = config.databaseUrl ? createDatabasePool(config.databaseUrl) : null;
 const workflowRepository = pool ? new WorkflowRepository(pool, { auditHmacKey: config.auditHmacKey, encryptionKey: config.encryptionKey }) : null;
 const workflowService = workflowRepository ? new WorkflowService({ repository: workflowRepository, t3010Repository: repository, config }) : null;
@@ -224,12 +239,20 @@ const httpServer = http.createServer(async (req, res) => {
       res.writeHead(200, { 'content-type': 'application/json' });
       return res.end(JSON.stringify({
         name: 'Canadian Philanthropy Clearing House', version: '0.4.0', mcp: '/mcp', privacy: '/privacy',
-        workflowWrites: config.enableWorkflowWrites, databaseConfigured: Boolean(pool), status: repository.status()
+        workflowWrites: config.enableWorkflowWrites, databaseConfigured: Boolean(pool), automationConfigured: config.automationEnabled,
+        status: repository.status()
       }));
     }
     if (req.url === '/healthz' && req.method === 'GET') {
       res.writeHead(200, { 'content-type': 'application/json' });
-      return res.end(JSON.stringify({ ok: true, data: repository.status(), workflowWrites: config.enableWorkflowWrites, databaseConfigured: Boolean(pool), loadError: loadError?.message ?? null }));
+      return res.end(JSON.stringify({
+        ok: true,
+        data: repository.status(),
+        workflowWrites: config.enableWorkflowWrites,
+        automationConfigured: config.automationEnabled,
+        databaseConfigured: Boolean(pool),
+        loadError: loadError?.message ?? null
+      }));
     }
     if (req.url === '/privacy' && req.method === 'GET') {
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
@@ -261,12 +284,13 @@ const httpServer = http.createServer(async (req, res) => {
 
 httpServer.listen(port, () => {
   console.log(`Canadian Philanthropy Clearing House MCP listening on :${port}/mcp`);
-  if (!repository.loaded) console.warn(`T3010 dataset not loaded from ${dataDir}; search tools will request ingestion.`);
+  if (!repository.loaded) console.warn(`T3010 dataset not loaded from ${dataDir}; autonomous sync can populate it when enabled.`);
   if (readiness.warnings.length) console.warn('Readiness warnings:', readiness.warnings.join(' '));
 });
 
 async function shutdown(signal) {
   console.log(`Received ${signal}; shutting down.`);
+  clearInterval(reloadTimer);
   httpServer.close(async () => {
     if (pool) await pool.end();
     process.exit(0);
