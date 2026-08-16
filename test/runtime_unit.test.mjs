@@ -1,9 +1,0 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
-import { encryptPrivateJson,decryptPrivateJson } from '../src/crypto/private-data.mjs';
-import { authenticateBearer,makeDevToken } from '../src/auth/oidc.mjs';
-import { loadRuntimeConfig,assessReadiness } from '../src/config/requirements.mjs';
-
-test('private workflow JSON is AES-GCM encrypted and round-trips',()=>{const secret='0123456789abcdef0123456789abcdef';const source={contact:{email:'recipient@example.ca'},bankingVerification:{status:'verified_external',reference:'provider:abc'}};const envelope=encryptPrivateJson(source,secret);assert.equal(envelope.alg,'A256GCM');assert.equal(JSON.stringify(envelope).includes('recipient@example.ca'),false);assert.deepEqual(decryptPrivateJson(envelope,secret),source);});
-test('development bearer auth validates role and organization BN claims',async()=>{process.env.ALLOW_DEV_AUTH='1';process.env.DEV_AUTH_SECRET='dev-auth-test-secret';const config=loadRuntimeConfig({NODE_ENV:'development'});const token=makeDevToken({sub:'u-1',roles:['foundation_analyst'],org_bns:['123456789RR0001'],exp:Math.floor(Date.now()/1000)+60},'dev-auth-test-secret');const identity=await authenticateBearer({headers:{authorization:`Bearer ${token}`}},config);assert.equal(identity.sub,'u-1');assert.deepEqual(identity.roles,['foundation_analyst']);assert.deepEqual(identity.organizationBns,['123456789RR0001']);});
-test('readiness requires notification webhook when a real notification provider is selected',()=>{const config=loadRuntimeConfig({NODE_ENV:'production',PUBLIC_BASE_URL:'https://example.ca',DATABASE_URL:'postgres://db',NOTIFICATION_PROVIDER:'email'});const result=assessReadiness(config);assert.equal(result.ready,false);assert.match(result.blockers.join(' '),/NOTIFICATION_WEBHOOK_URL/);});

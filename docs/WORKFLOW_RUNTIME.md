@@ -1,41 +1,17 @@
-# Workflow runtime
+# Workflow runtime extensions
 
-The production workflow layer sits on top of the public T3010 discovery engine and the production requirements established in `db/migrations/001_core.sql`.
+The production workflow layer is the authenticated PostgreSQL-backed runtime documented in `docs/WORKFLOW.md`. PR #3 has been reconciled onto that newer runtime rather than replacing it.
 
-## Storage
+`db/migrations/003_runtime_extensions.sql` carries forward the non-overlapping schema from the earlier runtime branch: allocation-plan metadata, proportional non-qualified-donee diligence, one-time browser offer tokens, payment-intent creator separation, browser-consent metadata, and external banking-verification references.
 
-`db/migrations/002_workflow_runtime.sql` adds allocation plans, non-qualified-donee diligence, one-time offer tokens, payment-intent creator separation, and browser-consent metadata.
+The existing runtime remains authoritative for OIDC authentication, organization-scoped RBAC, idempotent grant transitions, encrypted notification destinations, current CRA status observations, manual/external payment recording, and T3010/T1441 reporting preparation.
 
-Private organization workflow data is AES-256-GCM encrypted by the application before it enters PostgreSQL. The runtime stores contact data and external banking-verification references; it deliberately does not store bank account or card coordinates.
+## Intended extension boundaries
 
-## Identity and RBAC
+- **NQD diligence:** a non-qualified-donee grant can carry a proportional diligence assessment prepared by one actor and approved by a different compliance reviewer.
+- **Browser recipient acceptance:** an offered grant can use an expiring 256-bit bearer token whose SHA-256 hash is stored server-side. Browser acceptance/decline records consent only; it cannot authorize payment or collect banking credentials.
+- **Payment separation:** a payment operator creates an intent and a different payment operator authorizes it. Funds still move outside this application.
+- **Banking verification:** only encrypted external verification references/status are retained; bank account/card coordinates remain out of scope.
+- **CRA public evidence:** a revocations-page check can provide blocking evidence, but absence from that page is never proof of current registration or eligibility.
 
-Remote workflow MCP connections authenticate with OIDC/JWT. Authorization combines the role model in `src/security/rbac.mjs` with organization scope from either trusted token BN claims or verified database memberships.
-
-Approved recipient claims create a `recipient_admin` membership, so a charity can begin with a claim request and subsequently maintain one reusable profile.
-
-## Allocation and compliance
-
-Foundation analysts can create or match a budget-constrained plan, then propose it. Foundation approvers are separately permissioned, and proposer/approver separation is enforced by the grant lifecycle.
-
-Non-qualified-donee grants require documented proportional diligence and a separate compliance-reviewer approval before the plan can be approved.
-
-A payment cannot be authorized until the grant also has explicit recipient acceptance, external banking verification, a current operational recipient-status record marked `eligible`, and grant compliance approval.
-
-The public CRA revocations check is evidence only. It can block dispatch when revocation evidence is found, but absence from that page is never treated as an `eligible` status decision.
-
-## Recipient acceptance without ChatGPT
-
-Dispatch creates a random 256-bit offer token, persists only its SHA-256 hash, and sends a single-use browser link. The browser endpoint uses no-referrer/no-store/CSP headers and records accept/decline only. It cannot collect banking information or authorize payment.
-
-## Payment boundary
-
-The baseline payment providers remain `disabled` or `manual`. A payment operator can create an intent; a different payment operator must authorize it. The resulting state requires external execution. `record_external_payment` only records a payment reference after funds moved outside this application.
-
-There is no bank-transfer execution tool in the baseline MCP surface.
-
-## Reporting
-
-Paid grants can generate a reporting record. Non-qualified-donee reporting classification aggregates grants to the same recipient for the fiscal period before determining the T1441 route. A compliance reviewer records an external filing reference before the grant can move to `reported`.
-
-The runtime does not submit CRA returns directly.
+These extensions are additive to the workflow merged in PR #4 and must preserve its fail-closed release gates.

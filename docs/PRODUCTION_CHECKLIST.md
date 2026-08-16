@@ -2,7 +2,7 @@
 
 ## Before participant data
 - Deploy behind HTTPS.
-- Configure production OIDC issuer/client/audience/JWKS.
+- Configure production OIDC issuer/client/audience discovery and JWKS validation.
 - Configure 32+ character encryption and audit-HMAC secrets from a secret manager.
 - Apply all PostgreSQL migrations and test backup/restore.
 - Publish operator privacy, retention, breach-response and subprocessors information.
@@ -10,8 +10,8 @@
 ## Before real offers
 - Ingest the current T3010 dataset.
 - Establish recipient-claim verification procedures.
-- Configure and test the notification provider/webhook.
-- Verify one-time offer links from outside the deployment network.
+- Configure and test the notification provider.
+- Verify one-time offer links from outside the deployment network before enabling browser acceptance.
 - Establish analyst/approver and diligence reviewer separation of duties.
 
 ## Before payment authorization

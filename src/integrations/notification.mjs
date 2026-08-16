@@ -1,7 +1,41 @@
-export class DisabledNotificationAdapter { async send(){return{delivered:false,status:'disabled',providerMessageId:null};} }
-export class ConsoleNotificationAdapter { constructor({logger=console}={}){this.logger=logger;} async send(message){if(!message?.recipient||!message?.body)throw new Error('Notification recipient and body are required.');this.logger.info?.('[notification:console]',{recipient:message.recipient,channel:message.channel||'unknown'});return{delivered:true,status:'simulated',providerMessageId:`console-${Date.now()}`};} }
-export class WebhookNotificationAdapter {
-  constructor({provider,webhookUrl,token=''}={}){if(!provider)throw new Error('Notification provider is required.');if(!webhookUrl)throw new Error('Notification webhook URL is required.');this.provider=provider;this.webhookUrl=webhookUrl;this.token=token;}
-  async send(message){if(!message?.recipient||!message?.body)throw new Error('Notification recipient and body are required.');const response=await fetch(this.webhookUrl,{method:'POST',headers:{'content-type':'application/json',...(this.token?{authorization:`Bearer ${this.token}`}:{})},body:JSON.stringify({provider:this.provider,...message})});if(!response.ok)throw new Error(`Notification webhook failed: ${response.status}`);const result=await response.json().catch(()=>({}));return{delivered:true,status:'sent',providerMessageId:String(result.id||result.messageId||'')};}
+function xmlEscape(value) {
+  return String(value).replace(/[<>&'\"]/g, ch => ({ '<':'&lt;', '>':'&gt;', '&':'&amp;', "'":'&apos;', '"':'&quot;' }[ch]));
 }
-export function createNotificationAdapter(config,{logger=console}={}){if(config.notificationProvider==='disabled')return new DisabledNotificationAdapter();if(config.notificationProvider==='console')return new ConsoleNotificationAdapter({logger});if(['twilio','email'].includes(config.notificationProvider))return new WebhookNotificationAdapter({provider:config.notificationProvider,webhookUrl:config.notificationWebhookUrl,token:config.notificationWebhookToken});throw new Error(`Unsupported notification provider: ${config.notificationProvider}`);}
+
+async function twilioPost(config, resource, body) {
+  const url = `https://api.twilio.com/2010-04-01/Accounts/${encodeURIComponent(config.twilioAccountSid)}/${resource}.json`;
+  const auth = Buffer.from(`${config.twilioAccountSid}:${config.twilioAuthToken}`).toString('base64');
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      authorization: `Basic ${auth}`,
+      'content-type': 'application/x-www-form-urlencoded'
+    },
+    body: new URLSearchParams(body)
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(`Twilio ${resource} failed with HTTP ${response.status}: ${payload.message || 'unknown error'}`);
+  return { providerMessageId: payload.sid || null, providerStatus: payload.status || null };
+}
+
+export function createNotificationProvider(config) {
+  if (config.notificationProvider === 'disabled') {
+    return { async send() { throw new Error('Notification provider is disabled.'); } };
+  }
+  if (config.notificationProvider === 'console') {
+    return { async send(message) { console.log('[notification]', { ...message, to: '[redacted]' }); return { providerMessageId: `console-${Date.now()}` }; } };
+  }
+  if (config.notificationProvider === 'twilio') {
+    return {
+      async send({ channel, to, body }) {
+        if (channel === 'sms') return twilioPost(config, 'Messages', { To: to, From: config.twilioFromNumber, Body: body });
+        if (channel === 'voice') {
+          const twiml = `<Response><Say>${xmlEscape(body)}</Say></Response>`;
+          return twilioPost(config, 'Calls', { To: to, From: config.twilioFromNumber, Twiml: twiml });
+        }
+        throw new Error(`Twilio provider does not support channel ${channel}.`);
+      }
+    };
+  }
+  throw new Error(`Unsupported notification provider: ${config.notificationProvider}`);
+}

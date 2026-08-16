@@ -1,4 +1,5 @@
 import { PERMISSIONS, requirePermission } from '../security/rbac.mjs';
+import { isReleaseEligibleStatusCheck } from '../compliance/status_verifier.mjs';
 
 export const GRANT_STATES = Object.freeze({
   DRAFT: 'draft',
@@ -41,14 +42,6 @@ function assertProposal(grant) {
   if (!String(grant.purpose || '').trim()) throw new Error('Grant purpose is required.');
 }
 
-function freshStatusCheck(grant, now, maxAgeHours) {
-  const checkedAt = grant.recipientStatus?.verifiedAt ? new Date(grant.recipientStatus.verifiedAt) : null;
-  if (!checkedAt || Number.isNaN(checkedAt.getTime())) return false;
-  if (grant.recipientStatus?.status !== 'eligible') return false;
-  const ageMs = now.getTime() - checkedAt.getTime();
-  return ageMs >= 0 && ageMs <= maxAgeHours * 60 * 60 * 1000;
-}
-
 export function transitionGrant(grant, nextState, actor, input = {}, options = {}) {
   const now = options.now instanceof Date ? options.now : new Date(options.now || Date.now());
   const maxStatusAgeHours = options.maxStatusAgeHours ?? 24;
@@ -63,12 +56,19 @@ export function transitionGrant(grant, nextState, actor, input = {}, options = {
   if (nextState === GRANT_STATES.APPROVED && options.requireSeparationOfDuties !== false && grant.proposedBy === actor.id) {
     throw new Error('Separation of duties: proposer cannot approve the same grant.');
   }
+  if (nextState === GRANT_STATES.OFFERED) {
+    if (!String(input.termsVersion || '').trim()) throw new Error('termsVersion is required when offering a grant.');
+    if (!String(input.termsText || '').trim()) throw new Error('termsText is required when offering a grant.');
+  }
   if (nextState === GRANT_STATES.ACCEPTED) {
     if (actor.organizationId !== grant.recipientOrgId) throw new Error('Recipient acceptance must come from the recipient organization.');
     if (input.acceptedTerms !== true) throw new Error('Recipient must explicitly accept grant terms.');
+    if (!grant.termsVersion || input.termsVersion !== grant.termsVersion) throw new Error('Recipient must accept the currently offered terms version.');
   }
   if (nextState === GRANT_STATES.PAYMENT_AUTHORIZED) {
-    if (!freshStatusCheck(grant, now, maxStatusAgeHours)) throw new Error('Fresh eligible-recipient status verification is required before payment authorization.');
+    if (!isReleaseEligibleStatusCheck(grant.recipientStatus, { now, maxAgeHours: maxStatusAgeHours })) {
+      throw new Error('Fresh authoritative eligible-recipient status verification is required before payment authorization.');
+    }
     if (grant.compliance?.decision !== 'approved') throw new Error('Compliance approval is required before payment authorization.');
   }
   if (nextState === GRANT_STATES.PAID && !String(input.externalPaymentReference || '').trim()) {
