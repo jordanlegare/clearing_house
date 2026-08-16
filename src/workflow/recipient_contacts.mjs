@@ -68,6 +68,21 @@ async function appendAudit(repository, client, { actor = null, organizationId, a
     entry.payloadDigest, entry.previousDigest, entry.entryHmac]);
 }
 
+async function queueContactVerificationNotification(repository, client, { organizationId, contact, destination, challenge }) {
+  if (!organizationId || !contact?.id || !challenge?.id) throw new Error('Contact-verification notification requires organization, contact and challenge identifiers.');
+  if (!['sms','voice'].includes(contact.channel)) throw new Error('Contact-verification notification requires an SMS or voice channel.');
+  const idempotencyKey = `contact-verification:${challenge.id}`;
+  const existing = await client.query('SELECT id FROM notification_outbox WHERE idempotency_key=$1', [idempotencyKey]);
+  if (existing.rows[0]) return existing.rows[0];
+  const encryptedRecipient = encryptText(destination, repository.encryptionKey);
+  const { rows } = await client.query(`
+    INSERT INTO notification_outbox (grant_id,channel,recipient,template,payload,idempotency_key)
+    VALUES (NULL,$1,$2,'contact_verification',$3::jsonb,$4)
+    RETURNING id
+  `, [contact.channel, encryptedRecipient, JSON.stringify({ challengeId: challenge.id, organizationId }), idempotencyKey]);
+  return rows[0];
+}
+
 export async function seedPublicRecipientContacts(repository, t3010Repository, organizationIds = []) {
   if (!t3010Repository?.loaded) throw new Error('T3010 repository is required to seed public contacts.');
   const uniqueIds = [...new Set(organizationIds.filter(Boolean))];
@@ -159,14 +174,7 @@ export async function ensureContactVerification(repository, { organizationId, pr
       `, [contact.id, tokenHash(token), encryptText(token, repository.encryptionKey), expiresAt])).rows[0];
       await client.query(`UPDATE recipient_contacts SET status='verification_pending',updated_at=now() WHERE id=$1`, [contact.id]);
       const destination = decryptText(contact.destination_encrypted, repository.encryptionKey);
-      await repository.queueNotification(client, {
-        grantId: null,
-        channel: contact.channel,
-        to: destination,
-        template: 'contact_verification',
-        payload: { challengeId: challenge.id, organizationId },
-        idempotencyKey: `contact-verification:${challenge.id}`
-      });
+      await queueContactVerificationNotification(repository, client, { organizationId, contact, destination, challenge });
       await appendAudit(repository, client, {
         organizationId,
         action: 'recipient_contact.verification_queued',
