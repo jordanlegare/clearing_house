@@ -27,11 +27,17 @@ CREATE TABLE IF NOT EXISTS fiscal_reporting_packages (
   payload jsonb NOT NULL,
   filing_ready boolean NOT NULL DEFAULT false,
   prepared_by uuid NOT NULL REFERENCES users(id),
-  preparation_idempotency_key text NOT NULL UNIQUE,
   created_at timestamptz NOT NULL DEFAULT now(),
   UNIQUE (foundation_org_id,fiscal_period_start,fiscal_period_end,package_hash)
 );
 CREATE INDEX IF NOT EXISTS fiscal_reporting_packages_foundation_idx
   ON fiscal_reporting_packages(foundation_org_id,fiscal_period_end DESC,created_at DESC);
+
+CREATE TABLE IF NOT EXISTS fiscal_reporting_package_commands (
+  idempotency_key text PRIMARY KEY,
+  package_id uuid NOT NULL REFERENCES fiscal_reporting_packages(id) ON DELETE CASCADE,
+  package_hash text NOT NULL CHECK (package_hash ~ '^[a-f0-9]{64}$'),
+  created_at timestamptz NOT NULL DEFAULT now()
+);
 
 COMMIT;
