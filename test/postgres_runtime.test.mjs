@@ -1,0 +1,7 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { randomInt } from 'node:crypto';
+import { PostgresStore } from '../src/db/postgres-store.mjs';
+import { ROLES } from '../src/security/rbac.mjs';
+const db=process.env.DATABASE_URL;
+test('PostgreSQL runtime persists encrypted private data and HMAC-chained audit entries',{skip:!db},async()=>{const store=new PostgresStore({databaseUrl:db,encryptionKey:process.env.ENCRYPTION_KEY,auditHmacKey:process.env.AUDIT_HMAC_KEY});try{const user=await store.ensureUser({sub:`runtime-${Date.now()}`,email:'runtime@example.ca',name:'Runtime Test'});const actor={id:user.id,roles:[ROLES.SYSTEM_ADMIN],organizationId:null};const suffix=String(randomInt(100000,999999)),businessNumber=`${suffix}789RR0001`;const org=await store.upsertOrganization({businessNumber,legalName:'Encrypted Recipient',organizationType:'registered_charity',province:'ON',publicProfile:{mission:'Food'},privateProfile:{contact:{email:'secret@example.ca'}}},actor);const internal=await store.getOrganizationInternal(org.id);assert.equal(internal.privateProfile.contact.email,'secret@example.ca');const raw=(await store.query('SELECT private_profile FROM organizations WHERE id=$1',[org.id])).rows[0].private_profile;assert.equal(JSON.stringify(raw).includes('secret@example.ca'),false);const audit=await store.listAudit({resourceType:'organization',resourceId:org.id,limit:10});assert.ok(audit.length>=1);assert.match(audit[0].entry_hmac,/^[0-9a-f]{64}$/);}finally{await store.close();}});

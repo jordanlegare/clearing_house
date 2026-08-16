@@ -28,44 +28,55 @@ jobs:
           node-version: 22
       - run: npm install
       - run: npm run check
-      - run: npm test
+      - name: Apply PostgreSQL migrations
+        run: |
+          for migration in db/migrations/*.sql; do
+            echo "Applying $migration"
+            docker run --rm --network host -e PGPASSWORD=postgres -v "$PWD:/work" -w /work postgres:16 psql -h 127.0.0.1 -U postgres -d clearing_house_test -v ON_ERROR_STOP=1 -f "$migration"
+          done
+      - name: Test suite including PostgreSQL runtime
+        env:
+          DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/clearing_house_test
+          ENCRYPTION_KEY: 0123456789abcdef0123456789abcdef
+          AUDIT_HMAC_KEY: abcdef0123456789abcdef0123456789
+        run: npm test
       - name: Development readiness
         run: npm run readiness
       - name: Production readiness fails closed without workflow identity/secrets
         shell: bash
         run: |
-          if NODE_ENV=production \
-            PUBLIC_BASE_URL=https://clearing.example.ca \
-            DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/clearing_house_test \
-            ENABLE_WORKFLOW_WRITES=1 \
-            npm run readiness; then
+          if NODE_ENV=production PUBLIC_BASE_URL=https://clearing.example.ca DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/clearing_house_test ENABLE_WORKFLOW_WRITES=1 npm run readiness; then
             echo "readiness unexpectedly passed insecure write configuration"
             exit 1
           fi
       - name: Production read-only readiness can pass with HTTPS and persistence
-        run: |
-          NODE_ENV=production \
-          PUBLIC_BASE_URL=https://clearing.example.ca \
-          DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/clearing_house_test \
-          ENABLE_WORKFLOW_WRITES=0 \
-          npm run readiness
-      - name: Apply PostgreSQL core migration
-        run: |
-          docker run --rm --network host \
-            -e PGPASSWORD=postgres \
-            -v "$PWD:/work" -w /work postgres:16 \
-            psql -h 127.0.0.1 -U postgres -d clearing_house_test -v ON_ERROR_STOP=1 -f db/migrations/001_core.sql
-      - name: MCP protocol smoke
+        run: NODE_ENV=production PUBLIC_BASE_URL=https://clearing.example.ca DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/clearing_house_test ENABLE_WORKFLOW_WRITES=0 npm run readiness
+      - name: Public MCP protocol smoke
         shell: bash
         run: |
-          PORT=3100 npm start > /tmp/clearing-house.log 2>&1 &
+          PORT=3100 npm start > /tmp/clearing-house-public.log 2>&1 &
           pid=$!
           trap 'kill $pid 2>/dev/null || true' EXIT
-          for i in {1..20}; do
-            if curl -fsS http://127.0.0.1:3100/healthz > /tmp/health.json; then
-              break
-            fi
-            sleep 0.5
-          done
+          for i in {1..20}; do if curl -fsS http://127.0.0.1:3100/healthz > /tmp/health.json; then break; fi; sleep 0.5; done
           cat /tmp/health.json
           MCP_URL=http://127.0.0.1:3100/mcp node scripts/mcp-client-smoke.mjs
+      - name: Authenticated workflow MCP protocol smoke
+        shell: bash
+        env:
+          PORT: 3101
+          PUBLIC_BASE_URL: http://127.0.0.1:3101
+          ENABLE_WORKFLOW_WRITES: "1"
+          DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/clearing_house_test
+          ENCRYPTION_KEY: 0123456789abcdef0123456789abcdef
+          AUDIT_HMAC_KEY: abcdef0123456789abcdef0123456789
+          NOTIFICATION_PROVIDER: console
+          PAYMENT_PROVIDER: manual
+          ALLOW_DEV_AUTH: "1"
+          DEV_AUTH_SECRET: ci-secret
+        run: |
+          npm start > /tmp/clearing-house-workflow.log 2>&1 &
+          pid=$!
+          trap 'kill $pid 2>/dev/null || true' EXIT
+          for i in {1..20}; do if curl -fsS http://127.0.0.1:3101/healthz > /tmp/workflow-health.json; then break; fi; sleep 0.5; done
+          cat /tmp/workflow-health.json
+          MCP_URL=http://127.0.0.1:3101/mcp node scripts/mcp-workflow-smoke.mjs

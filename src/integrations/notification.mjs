@@ -1,14 +1,7 @@
-export class DisabledNotificationAdapter {
-  async send() {
-    return { delivered: false, status: 'disabled', providerMessageId: null };
-  }
+export class DisabledNotificationAdapter { async send(){return{delivered:false,status:'disabled',providerMessageId:null};} }
+export class ConsoleNotificationAdapter { constructor({logger=console}={}){this.logger=logger;} async send(message){if(!message?.recipient||!message?.body)throw new Error('Notification recipient and body are required.');this.logger.info?.('[notification:console]',{recipient:message.recipient,channel:message.channel||'unknown'});return{delivered:true,status:'simulated',providerMessageId:`console-${Date.now()}`};} }
+export class WebhookNotificationAdapter {
+  constructor({provider,webhookUrl,token=''}={}){if(!provider)throw new Error('Notification provider is required.');if(!webhookUrl)throw new Error('Notification webhook URL is required.');this.provider=provider;this.webhookUrl=webhookUrl;this.token=token;}
+  async send(message){if(!message?.recipient||!message?.body)throw new Error('Notification recipient and body are required.');const response=await fetch(this.webhookUrl,{method:'POST',headers:{'content-type':'application/json',...(this.token?{authorization:`Bearer ${this.token}`}:{})},body:JSON.stringify({provider:this.provider,...message})});if(!response.ok)throw new Error(`Notification webhook failed: ${response.status}`);const result=await response.json().catch(()=>({}));return{delivered:true,status:'sent',providerMessageId:String(result.id||result.messageId||'')};}
 }
-
-export class ConsoleNotificationAdapter {
-  constructor({ logger = console } = {}) { this.logger = logger; }
-  async send(message) {
-    if (!message?.recipient || !message?.body) throw new Error('Notification recipient and body are required.');
-    this.logger.info?.('[notification:console]', { recipient: message.recipient, channel: message.channel || 'unknown' });
-    return { delivered: true, status: 'simulated', providerMessageId: `console-${Date.now()}` };
-  }
-}
+export function createNotificationAdapter(config,{logger=console}={}){if(config.notificationProvider==='disabled')return new DisabledNotificationAdapter();if(config.notificationProvider==='console')return new ConsoleNotificationAdapter({logger});if(['twilio','email'].includes(config.notificationProvider))return new WebhookNotificationAdapter({provider:config.notificationProvider,webhookUrl:config.notificationWebhookUrl,token:config.notificationWebhookToken});throw new Error(`Unsupported notification provider: ${config.notificationProvider}`);}

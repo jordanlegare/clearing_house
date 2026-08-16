@@ -1,13 +1,13 @@
 {
   "name": "canadian-philanthropy-clearing-house",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "type": "module",
-  "description": "ChatGPT MCP app that ingests CRA T3010 open data and matches Canadian foundations with registered charities and other eligible recipients.",
+  "description": "ChatGPT MCP app that ingests CRA T3010 open data and routes Canadian philanthropic capital through authenticated, auditable grant workflows.",
   "engines": {"node": ">=22"},
   "scripts": {
     "test": "node --test test/*.test.mjs",
-    "check": "node --check src/mcp/server.mjs && node --check scripts/ingest-t3010.mjs && node --check scripts/check-readiness.mjs && node --check src/config/requirements.mjs && node --check src/security/rbac.mjs && node --check src/workflow/grant_lifecycle.mjs && node --check src/compliance/reporting.mjs && node --check src/integrations/notification.mjs && node --check src/integrations/payment.mjs",
+    "check": "node --check src/mcp/server.mjs && node --check src/mcp/public-tools.mjs && node --check src/mcp/workflow-tools.mjs && node --check src/auth/oidc.mjs && node --check src/crypto/private-data.mjs && node --check src/db/postgres-store.mjs && node --check src/workflow/grant_lifecycle.mjs && node --check src/workflow/service.mjs && node --check src/status/cra-evidence.mjs && node --check src/config/requirements.mjs && node --check src/security/rbac.mjs && node --check src/compliance/reporting.mjs && node --check src/integrations/notification.mjs && node --check src/integrations/payment.mjs && node --check scripts/ingest-t3010.mjs && node --check scripts/check-readiness.mjs && node --check scripts/mcp-client-smoke.mjs && node --check scripts/mcp-workflow-smoke.mjs",
     "readiness": "node scripts/check-readiness.mjs",
     "start": "node src/mcp/server.mjs",
     "ingest:t3010": "node scripts/ingest-t3010.mjs",
@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.26.0",
+    "pg": "^8.22.0",
     "zod": "^3.25.76"
   }
 }
