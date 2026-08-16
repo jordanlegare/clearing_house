@@ -4,9 +4,17 @@ import { PERMISSIONS, requireOrgPermission } from '../security/rbac.mjs';
 import { getReviewBundle } from './review_bundles.mjs';
 import { findVerifiedRecipientContact, seedPublicRecipientContacts, ensureContactVerification } from './recipient_contacts.mjs';
 import { seedWebsiteRecipientContacts } from '../integrations/website_contact.mjs';
+import { seedWebsiteRecipientEmailContacts } from '../integrations/website_email_contact.mjs';
 
 function termsDigest(text) {
   return crypto.createHash('sha256').update(String(text || '')).digest('hex');
+}
+
+function availableNotificationChannels(config) {
+  const channels = [];
+  if (config.notificationProvider && config.notificationProvider !== 'disabled') channels.push('sms', 'voice');
+  if (config.emailProvider && config.emailProvider !== 'disabled') channels.push('email');
+  return [...new Set(channels)];
 }
 
 export function offerBatchHash({ reviewBundleId, reviewBundleHash, termsVersion, termsText, preferredChannel }) {
@@ -94,7 +102,7 @@ export async function createOfferBatch(service, actor, {
   requireOrgPermission(actor, bundle.foundationOrgId, PERMISSIONS.OFFER_GRANT);
   if (bundle.status !== 'approved') throw new Error('Review bundle must be approved before a recipient offer batch can be created.');
   if (!bundle.items.length || !bundle.items.every(item => item.state === 'approved')) throw new Error('Every grant in the review bundle must still be approved before offering.');
-  if (!['sms','voice'].includes(preferredChannel)) throw new Error('preferredChannel must be sms or voice.');
+  if (!['sms','voice','email'].includes(preferredChannel)) throw new Error('preferredChannel must be sms, voice, or email.');
   const version = String(termsVersion || '').trim();
   const text = String(termsText || '').trim();
   if (!version || text.length < 10) throw new Error('Versioned offer terms are required.');
@@ -191,10 +199,87 @@ async function actorForUser(repository, userId) {
   };
 }
 
+async function ensurePreferredOrFallbackContact({ config, repository, t3010Repository, batch, item, allowedChannels }) {
+  const preferredOnly = allowedChannels.includes(batch.preferredChannel) ? [batch.preferredChannel] : allowedChannels;
+  let enrichment = null;
+  let challenge = await ensureContactVerification(repository, {
+    organizationId: item.recipientOrgId,
+    preferredChannel: batch.preferredChannel,
+    allowedChannels: preferredOnly,
+    portalBaseUrl: config.recipientPortalBaseUrl,
+    ttlHours: Math.min(config.offerTokenTtlHours || 72, 168)
+  });
+
+  if (!challenge.pending && challenge.reason === 'no_contact_candidate' && config.websiteContactEnrichmentEnabled) {
+    if (preferredOnly.includes('email')) {
+      enrichment = await seedWebsiteRecipientEmailContacts(repository, t3010Repository, item.recipientOrgId, {
+        enabled: true,
+        timeoutMs: config.websiteContactTimeoutMs,
+        maxBytes: config.websiteContactMaxBytes,
+        maxPages: config.websiteContactMaxPages
+      });
+    } else if (preferredOnly.some(channel => channel === 'sms' || channel === 'voice')) {
+      enrichment = await seedWebsiteRecipientContacts(repository, t3010Repository, item.recipientOrgId, {
+        enabled: true,
+        timeoutMs: config.websiteContactTimeoutMs,
+        maxBytes: config.websiteContactMaxBytes,
+        maxPages: config.websiteContactMaxPages
+      });
+    }
+    challenge = await ensureContactVerification(repository, {
+      organizationId: item.recipientOrgId,
+      preferredChannel: batch.preferredChannel,
+      allowedChannels: preferredOnly,
+      portalBaseUrl: config.recipientPortalBaseUrl,
+      ttlHours: Math.min(config.offerTokenTtlHours || 72, 168)
+    });
+  }
+
+  if (!challenge.pending && challenge.reason === 'no_contact_candidate' && preferredOnly.length < allowedChannels.length) {
+    challenge = await ensureContactVerification(repository, {
+      organizationId: item.recipientOrgId,
+      preferredChannel: batch.preferredChannel,
+      allowedChannels,
+      portalBaseUrl: config.recipientPortalBaseUrl,
+      ttlHours: Math.min(config.offerTokenTtlHours || 72, 168)
+    });
+    if (!challenge.pending && challenge.reason === 'no_contact_candidate' && config.websiteContactEnrichmentEnabled) {
+      const remaining = allowedChannels.filter(channel => !preferredOnly.includes(channel));
+      const enrichments = [];
+      if (remaining.includes('email')) {
+        enrichments.push(await seedWebsiteRecipientEmailContacts(repository, t3010Repository, item.recipientOrgId, {
+          enabled: true,
+          timeoutMs: config.websiteContactTimeoutMs,
+          maxBytes: config.websiteContactMaxBytes,
+          maxPages: config.websiteContactMaxPages
+        }));
+      }
+      if (remaining.some(channel => channel === 'sms' || channel === 'voice')) {
+        enrichments.push(await seedWebsiteRecipientContacts(repository, t3010Repository, item.recipientOrgId, {
+          enabled: true,
+          timeoutMs: config.websiteContactTimeoutMs,
+          maxBytes: config.websiteContactMaxBytes,
+          maxPages: config.websiteContactMaxPages
+        }));
+      }
+      enrichment = enrichments.find(result => result?.status === 'succeeded') || enrichments[0] || enrichment;
+      challenge = await ensureContactVerification(repository, {
+        organizationId: item.recipientOrgId,
+        preferredChannel: batch.preferredChannel,
+        allowedChannels,
+        portalBaseUrl: config.recipientPortalBaseUrl,
+        ttlHours: Math.min(config.offerTokenTtlHours || 72, 168)
+      });
+    }
+  }
+  return { challenge, enrichment };
+}
+
 export async function runOneOfferBatch({ config, repository, batchId, t3010Repository }) {
   let batch = await loadOfferBatch(repository, batchId);
   if (!batch || ['offered','cancelled'].includes(batch.status)) return { skipped: true, reason: 'batch_complete_or_missing' };
-  if (!config.recipientPortalEnabled || config.notificationProvider === 'disabled') return { skipped: true, reason: 'recipient_delivery_not_ready' };
+  const allowedChannels = availableNotificationChannels(config);
+  if (!config.recipientPortalEnabled || !allowedChannels.length) return { skipped: true, reason: 'recipient_delivery_not_ready' };
   const actor = await actorForUser(repository, batch.createdBy);
   requireOrgPermission(actor, batch.foundationOrgId, PERMISSIONS.OFFER_GRANT);
   const { WorkflowService } = await import('./workflow_service.mjs');
@@ -222,29 +307,9 @@ export async function runOneOfferBatch({ config, repository, batchId, t3010Repos
       continue;
     }
 
-    const contact = await findVerifiedRecipientContact(repository, item.recipientOrgId, batch.preferredChannel);
+    const contact = await findVerifiedRecipientContact(repository, item.recipientOrgId, batch.preferredChannel, allowedChannels);
     if (!contact) {
-      let enrichment = null;
-      let challenge = await ensureContactVerification(repository, {
-        organizationId: item.recipientOrgId,
-        preferredChannel: batch.preferredChannel,
-        portalBaseUrl: config.recipientPortalBaseUrl,
-        ttlHours: Math.min(config.offerTokenTtlHours || 72, 168)
-      });
-      if (!challenge.pending && challenge.reason === 'no_contact_candidate' && config.websiteContactEnrichmentEnabled) {
-        enrichment = await seedWebsiteRecipientContacts(repository, t3010Repository, item.recipientOrgId, {
-          enabled: true,
-          timeoutMs: config.websiteContactTimeoutMs,
-          maxBytes: config.websiteContactMaxBytes,
-          maxPages: config.websiteContactMaxPages
-        });
-        challenge = await ensureContactVerification(repository, {
-          organizationId: item.recipientOrgId,
-          preferredChannel: batch.preferredChannel,
-          portalBaseUrl: config.recipientPortalBaseUrl,
-          ttlHours: Math.min(config.offerTokenTtlHours || 72, 168)
-        });
-      }
+      const { challenge, enrichment } = await ensurePreferredOrFallbackContact({ config, repository, t3010Repository, batch, item, allowedChannels });
       const reason = challenge.pending
         ? 'Awaiting recipient contact verification'
         : enrichment?.reason || challenge.reason || 'No verified recipient contact is available';
