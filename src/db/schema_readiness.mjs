@@ -14,6 +14,7 @@ export const REQUIRED_SCHEMA_OBJECTS = Object.freeze([
   'grant_offer_batches',
   'recipient_contacts',
   'recipient_contact_discovery',
+  'recipient_contact_channel_discovery',
   'grant_reporting_metadata',
   'grant_reporting_metadata_commands',
   'fiscal_reporting_packages',
