@@ -37,6 +37,9 @@ export function loadRuntimeConfig(env = process.env) {
     enableWorkflowWrites: bool(env.ENABLE_WORKFLOW_WRITES, false),
     enableT3010Sync: bool(env.ENABLE_T3010_SYNC, false),
     automationEnabled: bool(env.AUTOMATION_ENABLED, false),
+    automatedPortfoliosEnabled: bool(env.AUTOMATED_PORTFOLIOS_ENABLED, false),
+    allocationPolicyPollSeconds: positiveInt(env.ALLOCATION_POLICY_POLL_SECONDS, 300),
+    allocationPolicyBatchSize: positiveInt(env.ALLOCATION_POLICY_BATCH_SIZE, 10),
     craStatusMaxAgeHours: positiveInt(env.CRA_STATUS_MAX_AGE_HOURS, 24),
     retentionDays: positiveInt(env.RETENTION_DAYS, 2555),
     notificationBatchSize: positiveInt(env.NOTIFICATION_BATCH_SIZE, 25),
@@ -66,6 +69,12 @@ export function assessReadiness(config) {
   }
 
   if (config.automationEnabled && !config.databaseUrl) blockers.push('DATABASE_URL is required when autonomous operations are enabled.');
+  if (config.automatedPortfoliosEnabled && !config.automationEnabled) blockers.push('AUTOMATION_ENABLED must be enabled when automated allocation policies are enabled.');
+  if (config.automatedPortfoliosEnabled && !config.enableWorkflowWrites) blockers.push('ENABLE_WORKFLOW_WRITES must be enabled when automated allocation policies can materialize drafts.');
+  if (config.automatedPortfoliosEnabled && !config.databaseUrl) blockers.push('DATABASE_URL is required when automated allocation policies are enabled.');
+  if (config.automatedPortfoliosEnabled && config.auditHmacKey.length < 32) blockers.push('AUDIT_HMAC_KEY must be at least 32 characters when automated allocation policies are enabled.');
+  if (config.allocationPolicyPollSeconds < 60) blockers.push('ALLOCATION_POLICY_POLL_SECONDS must be at least 60 seconds.');
+  if (config.allocationPolicyBatchSize > 100) blockers.push('ALLOCATION_POLICY_BATCH_SIZE cannot exceed 100.');
   if (config.recipientPortalEnabled && !config.databaseUrl) blockers.push('DATABASE_URL is required when the recipient portal is enabled.');
   if (config.recipientPortalEnabled && config.auditHmacKey.length < 32) blockers.push('AUDIT_HMAC_KEY must be at least 32 characters when the recipient portal is enabled.');
   if (config.recipientPortalEnabled && config.encryptionKey.length < 32) blockers.push('ENCRYPTION_KEY must be at least 32 characters when the recipient portal is enabled.');
@@ -83,6 +92,7 @@ export function assessReadiness(config) {
   if (config.enableWorkflowWrites && config.notificationProvider === 'disabled') warnings.push('Workflow writes are enabled while notifications are disabled; offers must be surfaced through another recipient channel.');
   if (config.enableWorkflowWrites && config.notificationProvider !== 'disabled' && !config.recipientPortalEnabled) warnings.push('Recipient notifications are enabled without the no-account recipient portal; messages cannot include secure one-click offer links.');
   if (config.automationEnabled && config.notificationProvider === 'disabled') warnings.push('Autonomous operations are enabled but recipient notifications are disabled.');
+  if (config.automatedPortfoliosEnabled && !config.enableT3010Sync) warnings.push('Automated allocation policies are enabled while T3010 auto-sync is off; policies will use whatever local public-data snapshot is loaded.');
   if (config.enableT3010Sync && !config.automationEnabled) warnings.push('T3010 synchronization is enabled but autonomous operations are off; refreshes require a manual sync action.');
   if (config.craStatusMaxAgeHours > 72) warnings.push('CRA status verification age exceeds 72 hours; consider a tighter release-time verification window.');
   if (config.retentionDays < 2190) warnings.push('Retention is under six years; verify CRA books-and-records requirements for each record class before production use.');
