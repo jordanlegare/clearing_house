@@ -6,6 +6,7 @@ import { RESOURCE_KINDS } from '../t3010/constants.mjs';
 import { ensureOfferAccess } from '../workflow/offer_access.mjs';
 import { getContactChallengeForNotification } from '../workflow/recipient_contacts.mjs';
 import { runOfferBatchesJob } from '../workflow/offer_batches.mjs';
+import { refreshStatusVerificationTasks } from '../workflow/status_verification_tasks.mjs';
 import { runAllocationPoliciesJob } from './allocation_policies.mjs';
 import { runReviewBundlesJob } from './review_bundle_worker.mjs';
 
@@ -72,6 +73,10 @@ export async function syncT3010Job({ config, dataDir, year }) {
   return { year: manifest.year, datasetId: manifest.datasetId, resources: manifest.resources?.length || 0, completedAt: new Date().toISOString() };
 }
 
+export async function statusEvidenceJob({ config, repository }) {
+  return refreshStatusVerificationTasks({ config, repository, limit: 100 });
+}
+
 export async function auditIntegrityJob({ config, pool }) {
   if (!config.auditHmacKey) return { skipped: true, reason: 'audit_hmac_key_not_configured' };
   const result = await verifyAuditChain(pool, config.auditHmacKey);
@@ -96,6 +101,7 @@ export async function runAutomationJob(name, context) {
   if (name === 'allocation_policies') return runAllocationPoliciesJob(context);
   if (name === 'review_bundles') return runReviewBundlesJob(context);
   if (name === 'offer_batches') return runOfferBatchesJob(context);
+  if (name === 'status_evidence') return statusEvidenceJob(context);
   if (name === 'notifications') return dispatchNotificationsJob(context);
   if (name === 't3010_sync') return syncT3010Job(context);
   if (name === 'audit_integrity') return auditIntegrityJob(context);
