@@ -32,7 +32,9 @@ function notificationSubject(notification) {
 }
 
 function notificationsEnabled(config) {
-  return config.notificationProvider !== 'disabled' || config.emailProvider !== 'disabled';
+  const phone = Boolean(config.notificationProvider && config.notificationProvider !== 'disabled');
+  const email = Boolean(config.emailProvider && config.emailProvider !== 'disabled');
+  return phone || email;
 }
 
 export async function dispatchNotificationsJob({ config, repository, provider }) {
