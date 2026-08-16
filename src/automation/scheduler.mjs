@@ -10,6 +10,12 @@ export function jobDefinitions(config) {
       metadata: { purpose: 'Keep pre-authorized foundation allocation envelopes filled with draft grants only.' }
     },
     {
+      name: 'review_bundles',
+      enabled: enabled && config.automatedPortfoliosEnabled,
+      intervalSeconds: config.allocationPolicyPollSeconds,
+      metadata: { purpose: 'Recover policy drafts, auto-propose only when pre-authorized, and assemble immutable review bundles.' }
+    },
+    {
       name: 'notifications',
       enabled: enabled && config.notificationProvider !== 'disabled',
       intervalSeconds: config.notificationPollSeconds,
