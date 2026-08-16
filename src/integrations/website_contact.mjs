@@ -206,6 +206,13 @@ function addCandidate(out, seen, phone, sourceUrl, extraction) {
   out.push({ channel: 'voice', destination: normalized, sourceUrl, extraction });
 }
 
+function isFaxLabel(before, after) {
+  const prefix = String(before || '').slice(-32);
+  const suffix = String(after || '').slice(0, 24);
+  return /(?:fax|facsimile|t[ée]l[ée]cop(?:ieur)?)\s*[:.\-]?\s*$/i.test(prefix)
+    || /^\s*(?:\(|\[|[-,:])?\s*(?:fax|facsimile|t[ée]l[ée]cop(?:ieur)?)\b/i.test(suffix);
+}
+
 export function extractWebsitePhoneCandidates(html, sourceUrl) {
   const out = [];
   const seen = new Set();
@@ -217,11 +224,11 @@ export function extractWebsitePhoneCandidates(html, sourceUrl) {
   const phonePattern = /(?:\+?1[\s.()\-]*)?(?:\(?\d{3}\)?[\s.\-]*)\d{3}[\s.\-]*\d{4}/g;
   const contactPage = CONTACT_HINT.test(new URL(sourceUrl).pathname);
   for (const match of text.matchAll(phonePattern)) {
-    const start = Math.max(0, (match.index || 0) - 48);
-    const end = Math.min(text.length, (match.index || 0) + match[0].length + 48);
-    const context = text.slice(start, end);
-    if (FAX_CONTEXT.test(context)) continue;
-    if (!contactPage && !PHONE_CONTEXT.test(context)) continue;
+    const index = match.index || 0;
+    const before = text.slice(Math.max(0, index - 48), index);
+    const after = text.slice(index + match[0].length, Math.min(text.length, index + match[0].length + 48));
+    if (isFaxLabel(before, after)) continue;
+    if (!contactPage && !PHONE_CONTEXT.test(`${before} ${after}`)) continue;
     addCandidate(out, seen, match[0], sourceUrl, 'page_text');
   }
   return out;
