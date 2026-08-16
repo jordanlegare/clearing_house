@@ -16,6 +16,12 @@ export function jobDefinitions(config) {
       metadata: { purpose: 'Recover policy drafts, auto-propose only when pre-authorized, and assemble immutable review bundles.' }
     },
     {
+      name: 'offer_batches',
+      enabled: enabled && config.enableWorkflowWrites && config.recipientPortalEnabled && config.notificationProvider !== 'disabled',
+      intervalSeconds: config.notificationPollSeconds,
+      metadata: { purpose: 'Advance approved review bundles through verified recipient contact discovery and grant offering without bypassing recipient consent.' }
+    },
+    {
       name: 'notifications',
       enabled: enabled && config.notificationProvider !== 'disabled',
       intervalSeconds: config.notificationPollSeconds,

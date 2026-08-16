@@ -17,8 +17,6 @@ export function extractBn(fields) {
       if (bn) return bn;
     }
   }
-  // Schema-drift fallback: CRA registered-charity BNs are distinctive enough to
-  // identify from a row without relying on an exact column label.
   for (const value of Object.values(fields)) {
     const bn = normalizeBn(value);
     if (bn) return bn;
@@ -55,6 +53,32 @@ export function extractCity(fields) {
 
 export function extractDesignation(fields) {
   return firstField(fields, [/designation/, /organization.*type/, /charity.*type/]);
+}
+
+export function normalizeCanadianPhone(value) {
+  const digits = String(value ?? '').replace(/\D/g, '');
+  if (digits.length === 10) return `+1${digits}`;
+  if (digits.length === 11 && digits.startsWith('1')) return `+${digits}`;
+  return null;
+}
+
+export function extractPhoneCandidates(...fieldSets) {
+  const candidates = [];
+  const seen = new Set();
+  for (const fields of fieldSets.filter(Boolean)) {
+    for (const [key, raw] of Object.entries(fields)) {
+      const normalizedKey = String(key).toLowerCase();
+      if (/fax/.test(normalizedKey)) continue;
+      const keyLooksPhone = /(phone|telephone|tel_|_tel|contact.*number|number.*contact)/i.test(normalizedKey);
+      if (!keyLooksPhone) continue;
+      const phone = normalizeCanadianPhone(raw);
+      if (!phone || seen.has(phone)) continue;
+      seen.add(phone);
+      candidates.push({ channel: 'sms', destination: phone, sourceKey: key, sourceValue: String(raw) });
+      candidates.push({ channel: 'voice', destination: phone, sourceKey: key, sourceValue: String(raw) });
+    }
+  }
+  return candidates;
 }
 
 export function numericFields(fields, keyPattern = /(dq|disbursement|property|asset|revenue|expenditure|amount|gift|grant)/i) {

@@ -1,0 +1,69 @@
+name: Verified contact offers
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  verified-contact-offers:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: clearing_house_contact_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
+      - name: Syntax-check contact and offer-batch modules
+        run: |
+          node --check src/t3010/normalize.mjs
+          node --check src/t3010/repository.mjs
+          node --check src/workflow/recipient_contacts.mjs
+          node --check src/workflow/offer_batches.mjs
+          node --check src/mcp/offer_tools.mjs
+          node --check src/automation/jobs.mjs
+          node --check src/automation/scheduler.mjs
+          node --check scripts/recipient-portal.mjs
+          node --check scripts/verified-contact-offer-db-smoke.mjs
+      - name: Full unit suite
+        run: npm test
+      - name: Apply all PostgreSQL migrations
+        run: |
+          for migration in db/migrations/*.sql; do
+            docker run --rm --network host -e PGPASSWORD=postgres -v "$PWD:/work" -w /work postgres:16 \
+              psql -h 127.0.0.1 -U postgres -d clearing_house_contact_test -v ON_ERROR_STOP=1 -f "$migration"
+          done
+      - name: Verified-contact autonomous offer lifecycle
+        env:
+          DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/clearing_house_contact_test
+          ENCRYPTION_KEY: eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+          AUDIT_HMAC_KEY: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+        run: node scripts/verified-contact-offer-db-smoke.mjs
+      - name: Recipient portal still boots with contact verification routes
+        shell: bash
+        env:
+          DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/clearing_house_contact_test
+          RECIPIENT_PORTAL_ENABLED: "1"
+          RECIPIENT_PORTAL_BASE_URL: http://127.0.0.1:3202
+          RECIPIENT_PORTAL_PORT: "3202"
+          ENCRYPTION_KEY: eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+          AUDIT_HMAC_KEY: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+        run: |
+          node scripts/recipient-portal.mjs > /tmp/recipient-contact-portal.log 2>&1 &
+          pid=$!; trap 'kill $pid 2>/dev/null || true' EXIT
+          for i in {1..20}; do if curl -fsS http://127.0.0.1:3202/healthz > /tmp/contact-health.json; then break; fi; sleep 0.5; done
+          cat /tmp/contact-health.json
+          grep 'recipient-portal' /tmp/contact-health.json

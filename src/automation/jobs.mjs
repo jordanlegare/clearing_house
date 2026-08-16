@@ -3,6 +3,8 @@ import { decryptText } from '../security/crypto.mjs';
 import { ingestT3010 } from '../t3010/importer.mjs';
 import { RESOURCE_KINDS } from '../t3010/constants.mjs';
 import { ensureOfferAccess } from '../workflow/offer_access.mjs';
+import { getContactChallengeForNotification } from '../workflow/recipient_contacts.mjs';
+import { runOfferBatchesJob } from '../workflow/offer_batches.mjs';
 import { runAllocationPoliciesJob } from './allocation_policies.mjs';
 import { runReviewBundlesJob } from './review_bundle_worker.mjs';
 
@@ -10,6 +12,13 @@ function offerMessage(notification, access) {
   const prefix = notification.channel === 'voice'
     ? 'A funding offer is available for your organization. This is not a request to submit an application. Your secure response link is '
     : 'A funding offer is available for your organization. No grant application is required. Review and respond securely: ';
+  return `${prefix}${access.url} . The link expires ${new Date(access.expiresAt).toLocaleDateString('en-CA')}. Do not forward the link.`;
+}
+
+function contactVerificationMessage(notification, access) {
+  const prefix = notification.channel === 'voice'
+    ? `Verify this public contact channel for ${access.organizationName}. This verification does not accept a funding offer. Open `
+    : `Verify this public contact channel for ${access.organizationName}. This verification does not accept a funding offer: `;
   return `${prefix}${access.url} . The link expires ${new Date(access.expiresAt).toLocaleDateString('en-CA')}. Do not forward the link.`;
 }
 
@@ -21,6 +30,7 @@ export async function dispatchNotificationsJob({ config, repository, provider })
   let failed = 0;
   let retried = 0;
   let secureOfferLinks = 0;
+  let contactVerificationLinks = 0;
   for (const notification of queued) {
     try {
       const to = decryptText(notification.recipient, config.encryptionKey);
@@ -36,6 +46,11 @@ export async function dispatchNotificationsJob({ config, repository, provider })
         });
         body = offerMessage(notification, access);
         secureOfferLinks += 1;
+      } else if (notification.template === 'contact_verification' && config.recipientPortalEnabled) {
+        if (!notification.payload?.challengeId) throw new Error('Contact-verification notification is missing challengeId.');
+        const access = await getContactChallengeForNotification(repository, notification.payload.challengeId, config.recipientPortalBaseUrl);
+        body = contactVerificationMessage(notification, access);
+        contactVerificationLinks += 1;
       }
       const delivered = await provider.send({ channel: notification.channel, to, body });
       await repository.markNotificationSent(notification.id, delivered.providerMessageId, lockToken);
@@ -47,7 +62,7 @@ export async function dispatchNotificationsJob({ config, repository, provider })
       if (retry) retried += 1;
     }
   }
-  return { processed: queued.length, sent, failed, retried, secureOfferLinks };
+  return { processed: queued.length, sent, failed, retried, secureOfferLinks, contactVerificationLinks };
 }
 
 export async function syncT3010Job({ config, dataDir, year }) {
@@ -68,6 +83,7 @@ export async function maintenanceJob({ pool }) {
 export async function runAutomationJob(name, context) {
   if (name === 'allocation_policies') return runAllocationPoliciesJob(context);
   if (name === 'review_bundles') return runReviewBundlesJob(context);
+  if (name === 'offer_batches') return runOfferBatchesJob(context);
   if (name === 'notifications') return dispatchNotificationsJob(context);
   if (name === 't3010_sync') return syncT3010Job(context);
   if (name === 'maintenance') return maintenanceJob(context);
