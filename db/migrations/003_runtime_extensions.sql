@@ -69,4 +69,60 @@ CREATE TABLE IF NOT EXISTS banking_verifications (
 );
 CREATE INDEX IF NOT EXISTS banking_verifications_grant_idx ON banking_verifications(grant_id, verified_at DESC);
 
+CREATE OR REPLACE FUNCTION enforce_nqd_diligence_before_compliance()
+RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  IF NEW.recipient_type = 'non_qualified_donee'
+     AND NEW.compliance_decision = 'approved'
+     AND OLD.compliance_decision IS DISTINCT FROM NEW.compliance_decision THEN
+    IF NOT EXISTS (
+      SELECT 1 FROM grantee_diligence d
+      WHERE d.grant_id = NEW.id
+        AND d.status = 'approved'
+        AND d.approved_by IS NOT NULL
+        AND d.approved_by <> d.prepared_by
+    ) THEN
+      RAISE EXCEPTION 'approved non-qualified-donee diligence by a separate reviewer is required';
+    END IF;
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS grants_nqd_diligence_gate ON grants;
+CREATE TRIGGER grants_nqd_diligence_gate
+BEFORE UPDATE OF compliance_decision ON grants
+FOR EACH ROW EXECUTE FUNCTION enforce_nqd_diligence_before_compliance();
+
+CREATE OR REPLACE FUNCTION enforce_payment_operator_separation()
+RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  IF NEW.authorized_by IS NOT NULL
+     AND (OLD.authorized_by IS DISTINCT FROM NEW.authorized_by OR TG_OP = 'INSERT') THEN
+    IF NEW.created_by IS NULL THEN
+      RAISE EXCEPTION 'payment intent must be created by an operator before authorization';
+    END IF;
+    IF NEW.created_by = NEW.authorized_by THEN
+      RAISE EXCEPTION 'payment intent creator cannot authorize the same payment';
+    END IF;
+    IF NOT EXISTS (
+      SELECT 1 FROM banking_verifications b
+      WHERE b.grant_id = NEW.grant_id
+        AND b.status = 'verified'
+        AND (b.expires_at IS NULL OR b.expires_at > now())
+      ORDER BY b.verified_at DESC
+      LIMIT 1
+    ) THEN
+      RAISE EXCEPTION 'fresh verified external banking evidence is required before payment authorization';
+    END IF;
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS payment_intents_operator_gate ON payment_intents;
+CREATE TRIGGER payment_intents_operator_gate
+BEFORE INSERT OR UPDATE OF authorized_by ON payment_intents
+FOR EACH ROW EXECUTE FUNCTION enforce_payment_operator_separation();
+
 COMMIT;
