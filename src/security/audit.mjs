@@ -13,6 +13,24 @@ export function payloadDigest(payload) {
   return crypto.createHash('sha256').update(canonical(payload ?? {})).digest('hex');
 }
 
+export function auditEntryHmacFromDigest({
+  key,
+  previousDigest = '',
+  occurredAt,
+  actorUserId = '',
+  organizationId = '',
+  action,
+  resourceType,
+  resourceId,
+  requestId = '',
+  payloadDigest: digest
+}) {
+  if (!key || key.length < 32) throw new Error('AUDIT_HMAC_KEY must be at least 32 characters.');
+  if (!/^[a-f0-9]{64}$/i.test(String(digest || ''))) throw new Error('Audit payload digest must be a SHA-256 hex digest.');
+  const material = [previousDigest || '', occurredAt, actorUserId || '', organizationId || '', action, resourceType, resourceId, requestId || '', digest].join('|');
+  return crypto.createHmac('sha256', key).update(material).digest('hex');
+}
+
 export function buildAuditEntry({
   key,
   previousDigest = '',
@@ -25,9 +43,18 @@ export function buildAuditEntry({
   requestId = '',
   payload = {}
 }) {
-  if (!key || key.length < 32) throw new Error('AUDIT_HMAC_KEY must be at least 32 characters.');
   const digest = payloadDigest(payload);
-  const material = [previousDigest, occurredAt, actorUserId, organizationId, action, resourceType, resourceId, requestId, digest].join('|');
-  const entryHmac = crypto.createHmac('sha256', key).update(material).digest('hex');
+  const entryHmac = auditEntryHmacFromDigest({
+    key,
+    previousDigest,
+    occurredAt,
+    actorUserId,
+    organizationId,
+    action,
+    resourceType,
+    resourceId,
+    requestId,
+    payloadDigest: digest
+  });
   return { payloadDigest: digest, previousDigest: previousDigest || null, entryHmac };
 }
