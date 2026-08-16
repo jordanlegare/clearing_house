@@ -21,9 +21,22 @@ function asIso(value) {
   return date.toISOString();
 }
 
+function dateOnly(value) {
+  if (typeof value === 'string') {
+    const match = value.match(/^(\d{4}-\d{2}-\d{2})/);
+    if (match) return match[1];
+  }
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    const year = value.getFullYear();
+    const month = String(value.getMonth() + 1).padStart(2, '0');
+    const day = String(value.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+  throw new Error('Fiscal package has an invalid fiscal-period date.');
+}
+
 function fiscalYearFromEnd(end) {
-  const match = String(end || '').match(/^(\d{4})-\d{2}-\d{2}$/);
-  if (!match) throw new Error('Fiscal package has an invalid fiscal-period end date.');
+  const match = dateOnly(end).match(/^(\d{4})-\d{2}-\d{2}$/);
   return Number(match[1]);
 }
 
@@ -66,6 +79,8 @@ function summarizeSubmission(row) {
 }
 
 async function currentPeriodRows(client, packageRow) {
+  const periodStart = dateOnly(packageRow.fiscal_period_start);
+  const periodEnd = dateOnly(packageRow.fiscal_period_end);
   const { rows } = await client.query(`
     SELECT g.id,g.foundation_org_id,g.recipient_org_id,g.recipient_type,g.amount_cad,g.purpose,g.state,g.updated_at,
            p.external_reference,p.recorded_at
@@ -76,7 +91,7 @@ async function currentPeriodRows(client, packageRow) {
       AND p.recorded_at < ($3::date + interval '1 day')
     ORDER BY p.recorded_at,g.id
     FOR UPDATE OF g
-  `, [packageRow.foundation_org_id, packageRow.fiscal_period_start, packageRow.fiscal_period_end]);
+  `, [packageRow.foundation_org_id, periodStart, periodEnd]);
   return rows;
 }
 
@@ -118,8 +133,8 @@ export async function recordFiscalReportingSubmission(repository, actor, {
 
   const currentPreview = await previewFiscalReportingPackage(repository, actor, {
     foundationOrgId: packageSnapshot.foundation_org_id,
-    fiscalPeriodStart: String(packageSnapshot.fiscal_period_start).slice(0, 10),
-    fiscalPeriodEnd: String(packageSnapshot.fiscal_period_end).slice(0, 10)
+    fiscalPeriodStart: dateOnly(packageSnapshot.fiscal_period_start),
+    fiscalPeriodEnd: dateOnly(packageSnapshot.fiscal_period_end)
   });
   if (currentPreview.packageHash !== packageSnapshot.package_hash) {
     throw new Error('The fiscal reporting package no longer matches the current recorded-payment/reporting metadata. Prepare and file an updated package before closeout.');
@@ -158,7 +173,9 @@ export async function recordFiscalReportingSubmission(repository, actor, {
       if (!String(row.external_reference || '').trim()) throw new Error(`Grant ${row.id} has no recorded external payment reference.`);
     }
 
-    const fiscalYear = fiscalYearFromEnd(String(packageRow.fiscal_period_end).slice(0, 10));
+    const fiscalYear = fiscalYearFromEnd(packageRow.fiscal_period_end);
+    const fiscalPeriodStart = dateOnly(packageRow.fiscal_period_start);
+    const fiscalPeriodEnd = dateOnly(packageRow.fiscal_period_end);
     const fiscalYearGrants = rows.map(row => ({ recipientOrgId: row.recipient_org_id, amountCad: Number(row.amount_cad) }));
     const scoped = scopedActor(actor, packageRow.foundation_org_id);
     const reportedGrantIds = [];
@@ -184,8 +201,8 @@ export async function recordFiscalReportingSubmission(repository, actor, {
         amountCad: Number(row.amount_cad),
         purpose: row.purpose,
         fiscalYear,
-        fiscalPeriodStart: String(packageRow.fiscal_period_start).slice(0, 10),
-        fiscalPeriodEnd: String(packageRow.fiscal_period_end).slice(0, 10),
+        fiscalPeriodStart,
+        fiscalPeriodEnd,
         classification,
         externalPaymentReference: row.external_reference,
         submissionReference: reference,

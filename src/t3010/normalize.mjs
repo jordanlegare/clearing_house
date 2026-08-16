@@ -62,6 +62,24 @@ export function normalizeCanadianPhone(value) {
   return null;
 }
 
+export function normalizeEmail(value) {
+  let text = String(value ?? '').trim();
+  if (/^mailto:/i.test(text)) text = text.slice(7).split('?')[0];
+  try { text = decodeURIComponent(text); } catch { /* retain original text */ }
+  text = text.trim();
+  if (!text || text.length > 254 || /[\s<>\u0000-\u001f\u007f]/.test(text)) return null;
+  const parts = text.split('@');
+  if (parts.length !== 2) return null;
+  const [localRaw, domainRaw] = parts;
+  if (!localRaw || localRaw.length > 64 || localRaw.startsWith('.') || localRaw.endsWith('.') || localRaw.includes('..')) return null;
+  if (!/^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+$/.test(localRaw)) return null;
+  let domain = domainRaw.toLowerCase().replace(/\.$/, '');
+  if (!domain || domain.length > 253 || domain.startsWith('.') || domain.endsWith('.') || domain.includes('..')) return null;
+  const labels = domain.split('.');
+  if (labels.some(label => !label || label.length > 63 || !/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/i.test(label))) return null;
+  return `${localRaw.toLowerCase()}@${domain}`;
+}
+
 export function extractPhoneCandidates(...fieldSets) {
   const candidates = [];
   const seen = new Set();
@@ -76,6 +94,25 @@ export function extractPhoneCandidates(...fieldSets) {
       seen.add(phone);
       candidates.push({ channel: 'sms', destination: phone, sourceKey: key, sourceValue: String(raw) });
       candidates.push({ channel: 'voice', destination: phone, sourceKey: key, sourceValue: String(raw) });
+    }
+  }
+  return candidates;
+}
+
+export function extractEmailCandidates(...fieldSets) {
+  const candidates = [];
+  const seen = new Set();
+  const emailPattern = /[A-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Z0-9.-]+\.[A-Z]{2,63}/ig;
+  for (const fields of fieldSets.filter(Boolean)) {
+    for (const [key, raw] of Object.entries(fields)) {
+      const normalizedKey = String(key).toLowerCase();
+      if (!/(email|e_mail|e-mail|courriel|mail.*address|contact.*mail)/i.test(normalizedKey)) continue;
+      for (const match of String(raw ?? '').matchAll(emailPattern)) {
+        const email = normalizeEmail(match[0]);
+        if (!email || seen.has(email)) continue;
+        seen.add(email);
+        candidates.push({ channel: 'email', destination: email, sourceKey: key, sourceValue: String(raw) });
+      }
     }
   }
   return candidates;

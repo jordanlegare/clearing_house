@@ -1,6 +1,9 @@
 import crypto from 'node:crypto';
 import { encryptText, decryptText } from '../security/crypto.mjs';
 import { buildAuditEntry } from '../security/audit.mjs';
+import { normalizeEmail } from '../t3010/normalize.mjs';
+
+const CONTACT_CHANNELS = Object.freeze(['sms','voice','email']);
 
 export class ContactChallengeError extends Error {
   constructor(message = 'This contact-verification link is invalid, expired, or already used.', statusCode = 410) {
@@ -12,7 +15,12 @@ export class ContactChallengeError extends Error {
 
 export function normalizeContactDestination(channel, value) {
   const text = String(value || '').trim();
-  if (!['sms','voice'].includes(channel)) throw new Error('Contact channel must be sms or voice.');
+  if (!CONTACT_CHANNELS.includes(channel)) throw new Error('Contact channel must be sms, voice, or email.');
+  if (channel === 'email') {
+    const email = normalizeEmail(text);
+    if (!email) throw new Error('Recipient email contact must be a valid email address.');
+    return email;
+  }
   const digits = text.replace(/\D/g, '');
   if (digits.length === 10) return `+1${digits}`;
   if (digits.length === 11 && digits.startsWith('1')) return `+${digits}`;
@@ -43,6 +51,24 @@ export function buildContactVerificationUrl(baseUrl, token) {
 function maskPhone(value) {
   const digits = String(value || '').replace(/\D/g, '');
   return digits.length >= 4 ? `•••-•••-${digits.slice(-4)}` : 'hidden';
+}
+
+function maskEmail(value) {
+  const email = normalizeEmail(value);
+  if (!email) return 'hidden';
+  const [local, domain] = email.split('@');
+  const visible = local.length <= 2 ? local.slice(0, 1) : local.slice(0, 2);
+  return `${visible}${'•'.repeat(Math.min(Math.max(local.length - visible.length, 2), 8))}@${domain}`;
+}
+
+function maskDestination(channel, value) {
+  return channel === 'email' ? maskEmail(value) : maskPhone(value);
+}
+
+function normalizedAllowedChannels(allowedChannels) {
+  if (!allowedChannels) return [...CONTACT_CHANNELS];
+  const channels = [...new Set(allowedChannels.filter(channel => CONTACT_CHANNELS.includes(channel)))];
+  return channels.length ? channels : [];
 }
 
 async function appendAudit(repository, client, { actor = null, organizationId, action, resourceType, resourceId, requestId, payload }) {
@@ -119,7 +145,7 @@ export async function upsertRecipientContactCandidate(repository, {
 
 async function queueContactVerificationNotification(repository, client, { organizationId, contact, destination, challenge }) {
   if (!organizationId || !contact?.id || !challenge?.id) throw new Error('Contact-verification notification requires organization, contact and challenge identifiers.');
-  if (!['sms','voice'].includes(contact.channel)) throw new Error('Contact-verification notification requires an SMS or voice channel.');
+  if (!CONTACT_CHANNELS.includes(contact.channel)) throw new Error('Contact-verification notification requires a supported contact channel.');
   const idempotencyKey = `contact-verification:${challenge.id}`;
   const existing = await client.query('SELECT id FROM notification_outbox WHERE idempotency_key=$1', [idempotencyKey]);
   if (existing.rows[0]) return existing.rows[0];
@@ -163,13 +189,15 @@ export async function seedPublicRecipientContacts(repository, t3010Repository, o
   return { organizations: organizations.length, candidates };
 }
 
-export async function findVerifiedRecipientContact(repository, organizationId, preferredChannel = 'sms') {
+export async function findVerifiedRecipientContact(repository, organizationId, preferredChannel = 'sms', allowedChannels = null) {
+  const channels = normalizedAllowedChannels(allowedChannels);
+  if (!channels.length) return null;
   const { rows } = await repository.pool.query(`
     SELECT * FROM recipient_contacts
-    WHERE organization_id=$1 AND status='verified'
+    WHERE organization_id=$1 AND status='verified' AND channel=ANY($3::text[])
     ORDER BY CASE WHEN channel=$2 THEN 0 ELSE 1 END, verified_at DESC, created_at
     LIMIT 1
-  `, [organizationId, preferredChannel]);
+  `, [organizationId, preferredChannel, channels]);
   const row = rows[0];
   if (!row) return null;
   return {
@@ -183,20 +211,22 @@ export async function findVerifiedRecipientContact(repository, organizationId, p
   };
 }
 
-async function chooseCandidate(repository, organizationId, preferredChannel) {
+async function chooseCandidate(repository, organizationId, preferredChannel, allowedChannels = null) {
+  const channels = normalizedAllowedChannels(allowedChannels);
+  if (!channels.length) return null;
   const { rows } = await repository.pool.query(`
     SELECT * FROM recipient_contacts
-    WHERE organization_id=$1 AND status IN ('candidate','verification_pending')
+    WHERE organization_id=$1 AND status IN ('candidate','verification_pending') AND channel=ANY($3::text[])
     ORDER BY CASE WHEN channel=$2 THEN 0 ELSE 1 END, created_at
     LIMIT 1
-  `, [organizationId, preferredChannel]);
+  `, [organizationId, preferredChannel, channels]);
   return rows[0] || null;
 }
 
-export async function ensureContactVerification(repository, { organizationId, preferredChannel = 'sms', portalBaseUrl, ttlHours = 72 }) {
-  const verified = await findVerifiedRecipientContact(repository, organizationId, preferredChannel);
+export async function ensureContactVerification(repository, { organizationId, preferredChannel = 'sms', allowedChannels = null, portalBaseUrl, ttlHours = 72 }) {
+  const verified = await findVerifiedRecipientContact(repository, organizationId, preferredChannel, allowedChannels);
   if (verified) return { verified: true, contact: verified };
-  const contact = await chooseCandidate(repository, organizationId, preferredChannel);
+  const contact = await chooseCandidate(repository, organizationId, preferredChannel, allowedChannels);
   if (!contact) return { verified: false, pending: false, reason: 'no_contact_candidate' };
   const client = await repository.pool.connect();
   try {
@@ -285,7 +315,7 @@ export async function inspectContactChallenge(repository, rawToken) {
     organizationId: row.organization_id,
     organizationName: row.legal_name,
     channel: row.channel,
-    maskedDestination: maskPhone(destination),
+    maskedDestination: maskDestination(row.channel, destination),
     expiresAt: row.expires_at?.toISOString?.() || row.expires_at
   };
 }
@@ -305,7 +335,11 @@ export async function verifyContactChallenge(repository, rawToken) {
     `, [tokenHash(token)]);
     const row = rows[0];
     if (!row || row.used_at || row.revoked_at || new Date(row.expires_at).getTime() <= Date.now()) throw new ContactChallengeError();
-    const verificationMethod = row.source === 'website_public' ? 'public_website_channel_control' : 'public_t3010_channel_control';
+    const verificationMethod = row.source === 'website_public'
+      ? 'public_website_channel_control'
+      : row.source === 't3010_public'
+        ? 'public_t3010_channel_control'
+        : 'channel_control';
     await client.query(`UPDATE recipient_contact_challenges SET used_at=now() WHERE id=$1`, [row.id]);
     await client.query(`UPDATE recipient_contact_challenges SET revoked_at=COALESCE(revoked_at,now()) WHERE contact_id=$1 AND id<>$2 AND used_at IS NULL AND revoked_at IS NULL`, [row.contact_id, row.id]);
     await client.query(`

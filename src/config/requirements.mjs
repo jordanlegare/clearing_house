@@ -30,10 +30,13 @@ export function loadRuntimeConfig(env = process.env) {
     encryptionKey: env.ENCRYPTION_KEY || '',
     auditHmacKey: env.AUDIT_HMAC_KEY || '',
     notificationProvider: env.NOTIFICATION_PROVIDER || 'disabled',
+    emailProvider: env.EMAIL_PROVIDER || 'disabled',
     paymentProvider: env.PAYMENT_PROVIDER || 'disabled',
     twilioAccountSid: env.TWILIO_ACCOUNT_SID || '',
     twilioAuthToken: env.TWILIO_AUTH_TOKEN || '',
     twilioFromNumber: env.TWILIO_FROM_NUMBER || '',
+    resendApiKey: env.RESEND_API_KEY || '',
+    resendFromEmail: env.RESEND_FROM_EMAIL || '',
     enableWorkflowWrites: bool(env.ENABLE_WORKFLOW_WRITES, false),
     enableT3010Sync: bool(env.ENABLE_T3010_SYNC, false),
     automationEnabled: bool(env.AUTOMATION_ENABLED, false),
@@ -59,6 +62,9 @@ export function loadRuntimeConfig(env = process.env) {
 export function assessReadiness(config) {
   const blockers = [];
   const warnings = [];
+  const phoneNotificationsEnabled = config.notificationProvider !== 'disabled';
+  const emailNotificationsEnabled = config.emailProvider !== 'disabled';
+  const anyNotificationsEnabled = phoneNotificationsEnabled || emailNotificationsEnabled;
 
   if (config.production) {
     if (!config.publicBaseUrl.startsWith('https://')) blockers.push('PUBLIC_BASE_URL must use HTTPS in production.');
@@ -69,7 +75,8 @@ export function assessReadiness(config) {
     if (config.enableWorkflowWrites && config.encryptionKey.length < 32) blockers.push('ENCRYPTION_KEY must be at least 32 characters when workflow writes are enabled.');
     if (config.enableWorkflowWrites && config.auditHmacKey.length < 32) blockers.push('AUDIT_HMAC_KEY must be at least 32 characters when workflow writes are enabled.');
     if (config.recipientPortalEnabled && !config.recipientPortalBaseUrl.startsWith('https://')) blockers.push('RECIPIENT_PORTAL_BASE_URL must use HTTPS when the recipient portal is enabled in production.');
-    if (config.notificationProvider === 'console') blockers.push('Console notifications are not permitted in production.');
+    if (config.notificationProvider === 'console') blockers.push('Console phone notifications are not permitted in production.');
+    if (config.emailProvider === 'console') blockers.push('Console email notifications are not permitted in production.');
   }
 
   if (config.automationEnabled && !config.databaseUrl) blockers.push('DATABASE_URL is required when autonomous operations are enabled.');
@@ -85,6 +92,7 @@ export function assessReadiness(config) {
   if (config.recipientPortalEnabled && !config.recipientPortalBaseUrl) blockers.push('RECIPIENT_PORTAL_BASE_URL is required when the recipient portal is enabled.');
   if (config.offerTokenTtlHours > 720) blockers.push('OFFER_TOKEN_TTL_HOURS cannot exceed 720 hours.');
   if (!['disabled', 'console', 'twilio'].includes(config.notificationProvider)) blockers.push(`Unsupported NOTIFICATION_PROVIDER: ${config.notificationProvider}`);
+  if (!['disabled', 'console', 'resend'].includes(config.emailProvider)) blockers.push(`Unsupported EMAIL_PROVIDER: ${config.emailProvider}`);
   if (!['disabled', 'manual'].includes(config.paymentProvider)) blockers.push(`Unsupported PAYMENT_PROVIDER: ${config.paymentProvider}`);
   if (config.notificationProvider === 'twilio') {
     if (!config.twilioAccountSid) blockers.push('TWILIO_ACCOUNT_SID is required for Twilio notifications.');
@@ -92,19 +100,24 @@ export function assessReadiness(config) {
     if (!config.twilioFromNumber) blockers.push('TWILIO_FROM_NUMBER is required for Twilio notifications.');
     if (config.encryptionKey.length < 32) blockers.push('ENCRYPTION_KEY is required to encrypt notification recipients.');
   }
+  if (config.emailProvider === 'resend') {
+    if (!config.resendApiKey) blockers.push('RESEND_API_KEY is required for Resend email notifications.');
+    if (!config.resendFromEmail) blockers.push('RESEND_FROM_EMAIL is required for Resend email notifications.');
+    if (config.encryptionKey.length < 32) blockers.push('ENCRYPTION_KEY is required to encrypt email recipients.');
+  }
   if (config.websiteContactEnrichmentEnabled) {
     if (!config.automationEnabled) blockers.push('AUTOMATION_ENABLED must be enabled when website contact enrichment is enabled.');
     if (!config.enableWorkflowWrites) blockers.push('ENABLE_WORKFLOW_WRITES must be enabled when website contact enrichment is enabled.');
     if (!config.recipientPortalEnabled) blockers.push('RECIPIENT_PORTAL_ENABLED must be enabled when website contact enrichment is enabled.');
-    if (config.notificationProvider === 'disabled') blockers.push('NOTIFICATION_PROVIDER must be enabled when website contact enrichment is enabled so candidates can prove channel control.');
+    if (!anyNotificationsEnabled) blockers.push('At least one phone or email notification provider must be enabled when website contact enrichment is enabled so candidates can prove channel control.');
     if (config.websiteContactTimeoutMs < 1000 || config.websiteContactTimeoutMs > 10000) blockers.push('WEBSITE_CONTACT_TIMEOUT_MS must be between 1000 and 10000 milliseconds.');
     if (config.websiteContactMaxPages > 5) blockers.push('WEBSITE_CONTACT_MAX_PAGES cannot exceed 5.');
     if (config.websiteContactMaxBytes > 1048576) blockers.push('WEBSITE_CONTACT_MAX_BYTES cannot exceed 1048576 bytes.');
   }
   if (config.enableWorkflowWrites && config.paymentProvider === 'disabled') warnings.push('Workflow writes are enabled while payments are disabled; grants can progress only to acceptance/compliance workflows.');
-  if (config.enableWorkflowWrites && config.notificationProvider === 'disabled') warnings.push('Workflow writes are enabled while notifications are disabled; offers must be surfaced through another recipient channel.');
-  if (config.enableWorkflowWrites && config.notificationProvider !== 'disabled' && !config.recipientPortalEnabled) warnings.push('Recipient notifications are enabled without the no-account recipient portal; messages cannot include secure one-click offer links.');
-  if (config.automationEnabled && config.notificationProvider === 'disabled') warnings.push('Autonomous operations are enabled but recipient notifications are disabled.');
+  if (config.enableWorkflowWrites && !anyNotificationsEnabled) warnings.push('Workflow writes are enabled while notifications are disabled; offers must be surfaced through another recipient channel.');
+  if (config.enableWorkflowWrites && anyNotificationsEnabled && !config.recipientPortalEnabled) warnings.push('Recipient notifications are enabled without the no-account recipient portal; messages cannot include secure one-click offer links.');
+  if (config.automationEnabled && !anyNotificationsEnabled) warnings.push('Autonomous operations are enabled but recipient notifications are disabled.');
   if (config.automatedPortfoliosEnabled && !config.enableT3010Sync) warnings.push('Automated allocation policies are enabled while T3010 auto-sync is off; policies will use whatever local public-data snapshot is loaded.');
   if (config.websiteContactEnrichmentEnabled && !config.enableT3010Sync) warnings.push('Website contact enrichment is enabled while T3010 auto-sync is off; website URLs may become stale.');
   if (config.enableT3010Sync && !config.automationEnabled) warnings.push('T3010 synchronization is enabled but autonomous operations are off; refreshes require a manual sync action.');

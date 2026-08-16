@@ -112,8 +112,8 @@ export function registerWorkflowTools(server, { service, actor }) {
       grantId: uuid,
       termsVersion: z.string().min(1).max(100),
       termsText: z.string().min(10).max(50_000),
-      notificationChannel: z.enum(['none','sms','voice']).default('none'),
-      notificationRecipient: z.string().min(6).max(100).optional(),
+      notificationChannel: z.enum(['none','email','sms','voice']).default('none'),
+      notificationRecipient: z.string().min(3).max(254).optional(),
       idempotencyKey
     }, annotations: consequential
   }, async args => { const offered = await service.offerGrant(actor, args); return result('Grant offered under the supplied terms. Any selected notification was queued; recipient acceptance is still required.', offered); });

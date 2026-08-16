@@ -34,10 +34,15 @@ jobs:
           node --check src/workflow/recipient_contacts.mjs
           node --check src/workflow/offer_batches.mjs
           node --check src/mcp/offer_tools.mjs
+          node --check src/integrations/website_contact.mjs
+          node --check src/integrations/website_email_contact.mjs
+          node --check src/integrations/notification.mjs
+          node --check src/config/requirements.mjs
           node --check src/automation/jobs.mjs
           node --check src/automation/scheduler.mjs
           node --check scripts/recipient-portal.mjs
           node --check scripts/verified-contact-offer-db-smoke.mjs
+          node --check scripts/verified-email-offer-db-smoke.mjs
       - name: Full unit suite
         run: npm test
       - name: Apply all PostgreSQL migrations
@@ -52,6 +57,12 @@ jobs:
           ENCRYPTION_KEY: eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
           AUDIT_HMAC_KEY: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
         run: node scripts/verified-contact-offer-db-smoke.mjs
+      - name: Verified-email autonomous offer lifecycle
+        env:
+          DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/clearing_house_contact_test
+          ENCRYPTION_KEY: eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+          AUDIT_HMAC_KEY: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+        run: node scripts/verified-email-offer-db-smoke.mjs
       - name: Recipient portal still boots with contact verification routes
         shell: bash
         env:

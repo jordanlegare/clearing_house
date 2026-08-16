@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import readline from 'node:readline';
 import { createReadStream } from 'node:fs';
-import { extractCity, extractDesignation, extractName, extractProvince, numericFields, firstField, extractPhoneCandidates } from './normalize.mjs';
+import { extractCity, extractDesignation, extractName, extractProvince, numericFields, firstField, extractPhoneCandidates, extractEmailCandidates } from './normalize.mjs';
 
 const STOP = new Set('the and for with from this that those these de la le les des du et pour une un dans sur of to a an in on by at is are be as or canada canadian foundation charity charitable society association incorporated inc corporation corp trust fund fonds fondation'.split(' '));
 
@@ -124,7 +124,10 @@ export class T3010Repository {
       fiscalPeriodEnd: firstField(ident.fields, [/fiscal.*period.*end/, /fpe/, /fiscal.*end/]),
       isFoundation: this.foundationByBn.has(bn) || /foundation|fondation/i.test(designation),
       website: web ? firstField(web.fields, [/website/, /web.*url/, /^url$/]) : '',
-      publicContactCandidates: extractPhoneCandidates(ident.fields, web?.fields),
+      publicContactCandidates: [
+        ...extractPhoneCandidates(ident.fields, web?.fields),
+        ...extractEmailCandidates(ident.fields, web?.fields)
+      ],
       programDescriptions: programs.slice(0, 8).map(r => firstField(r.fields, [/description/, /program/, /activity/]) || r.name).filter(Boolean),
       financialSignals: financial ? numericFields(financial.fields, /(revenue|expenditure|asset|liabil|gift|grant)/i) : {},
       sourceYear: this.manifest?.year ?? null

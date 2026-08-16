@@ -24,8 +24,21 @@ function contactVerificationMessage(notification, access) {
   return `${prefix}${access.url} . The link expires ${new Date(access.expiresAt).toLocaleDateString('en-CA')}. Do not forward the link.`;
 }
 
+function notificationSubject(notification) {
+  if (notification.subject) return notification.subject;
+  if (notification.template === 'contact_verification') return 'Verify your organization contact channel';
+  if (notification.template === 'grant_offer') return 'Funding offer for your organization';
+  return 'Canadian Philanthropy Clearing House';
+}
+
+function notificationsEnabled(config) {
+  const phone = Boolean(config.notificationProvider && config.notificationProvider !== 'disabled');
+  const email = Boolean(config.emailProvider && config.emailProvider !== 'disabled');
+  return phone || email;
+}
+
 export async function dispatchNotificationsJob({ config, repository, provider }) {
-  if (config.notificationProvider === 'disabled') return { skipped: true, reason: 'notification_provider_disabled' };
+  if (!notificationsEnabled(config)) return { skipped: true, reason: 'notification_providers_disabled' };
   const lockToken = crypto.randomUUID();
   const queued = await repository.claimQueuedNotifications(config.notificationBatchSize, lockToken);
   let sent = 0;
@@ -54,7 +67,13 @@ export async function dispatchNotificationsJob({ config, repository, provider })
         body = contactVerificationMessage(notification, access);
         contactVerificationLinks += 1;
       }
-      const delivered = await provider.send({ channel: notification.channel, to, body });
+      const delivered = await provider.send({
+        channel: notification.channel,
+        to,
+        body,
+        subject: notificationSubject(notification),
+        idempotencyKey: notification.idempotency_key
+      });
       await repository.markNotificationSent(notification.id, delivered.providerMessageId, lockToken);
       sent += 1;
     } catch (error) {
