@@ -1,5 +1,6 @@
 name: T3010 live smoke
 on:
+  pull_request:
   workflow_dispatch:
   schedule:
     - cron: '17 11 * * 1'
