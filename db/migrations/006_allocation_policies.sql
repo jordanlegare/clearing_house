@@ -1,5 +1,12 @@
 BEGIN;
 
+-- Fix a latent schema/repository mismatch: WorkflowRepository.upsertPublicOrganization
+-- uses ON CONFLICT (business_number), which PostgreSQL cannot infer from the original
+-- partial unique index. A normal UNIQUE index still allows multiple NULL values while
+-- making the conflict target valid for all T3010-driven organization upserts.
+DROP INDEX IF EXISTS organizations_bn_unique;
+CREATE UNIQUE INDEX organizations_bn_unique ON organizations(business_number);
+
 CREATE TABLE IF NOT EXISTS foundation_allocation_policies (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   foundation_org_id uuid NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
