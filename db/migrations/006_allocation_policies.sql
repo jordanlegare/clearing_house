@@ -35,6 +35,16 @@ CREATE UNIQUE INDEX IF NOT EXISTS allocation_policy_title_unique
 CREATE INDEX IF NOT EXISTS allocation_policy_due_idx
   ON foundation_allocation_policies(enabled, next_run_at, window_start, window_end);
 
+CREATE TABLE IF NOT EXISTS foundation_allocation_policy_commands (
+  idempotency_key text PRIMARY KEY,
+  policy_id uuid NOT NULL REFERENCES foundation_allocation_policies(id) ON DELETE CASCADE,
+  command text NOT NULL CHECK (command IN ('create','update','enable','disable','run_now')),
+  result jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS allocation_policy_commands_policy_idx
+  ON foundation_allocation_policy_commands(policy_id, created_at DESC);
+
 ALTER TABLE grants ADD COLUMN IF NOT EXISTS automation_policy_id uuid REFERENCES foundation_allocation_policies(id) ON DELETE SET NULL;
 CREATE INDEX IF NOT EXISTS grants_automation_policy_idx ON grants(automation_policy_id, state);
 
