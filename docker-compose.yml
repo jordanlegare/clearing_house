@@ -53,6 +53,10 @@ services:
       AUTOMATION_POLL_SECONDS: ${AUTOMATION_POLL_SECONDS:-10}
       AUTOMATION_LEASE_SECONDS: ${AUTOMATION_LEASE_SECONDS:-300}
       ENABLE_WORKFLOW_WRITES: ${ENABLE_WORKFLOW_WRITES:-0}
+      RECIPIENT_PORTAL_ENABLED: ${RECIPIENT_PORTAL_ENABLED:-0}
+      RECIPIENT_PORTAL_BASE_URL: ${RECIPIENT_PORTAL_BASE_URL:-http://localhost:3001}
+      RECIPIENT_PORTAL_PORT: 3001
+      OFFER_TOKEN_TTL_HOURS: ${OFFER_TOKEN_TTL_HOURS:-168}
       OIDC_ISSUER: ${OIDC_ISSUER:-}
       OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-}
       OIDC_AUDIENCE: ${OIDC_AUDIENCE:-}
@@ -83,6 +87,21 @@ services:
       AUTOMATION_WORKER_ID: ${AUTOMATION_WORKER_ID:-primary-worker}
     volumes:
       - t3010-data:/app/data/t3010
+
+  recipient-portal:
+    profiles: ["recipient-portal"]
+    build: .
+    command: npm run portal
+    restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    ports:
+      - "${RECIPIENT_PORTAL_PORT:-3001}:3001"
+    environment:
+      <<: *app-env
+      RECIPIENT_PORTAL_ENABLED: "1"
+      RECIPIENT_PORTAL_PORT: 3001
 
 volumes:
   postgres-data:

@@ -19,6 +19,10 @@ export function loadRuntimeConfig(env = process.env) {
     nodeEnv,
     production,
     publicBaseUrl: env.PUBLIC_BASE_URL || '',
+    recipientPortalEnabled: bool(env.RECIPIENT_PORTAL_ENABLED, false),
+    recipientPortalBaseUrl: env.RECIPIENT_PORTAL_BASE_URL || '',
+    recipientPortalPort: positiveInt(env.RECIPIENT_PORTAL_PORT, 3001),
+    offerTokenTtlHours: positiveInt(env.OFFER_TOKEN_TTL_HOURS, 168),
     databaseUrl: env.DATABASE_URL || '',
     oidcIssuer: env.OIDC_ISSUER || '',
     oidcClientId: env.OIDC_CLIENT_ID || '',
@@ -57,10 +61,16 @@ export function assessReadiness(config) {
     if (config.enableWorkflowWrites && !config.oidcAudience) blockers.push('OIDC_AUDIENCE is required when workflow writes are enabled.');
     if (config.enableWorkflowWrites && config.encryptionKey.length < 32) blockers.push('ENCRYPTION_KEY must be at least 32 characters when workflow writes are enabled.');
     if (config.enableWorkflowWrites && config.auditHmacKey.length < 32) blockers.push('AUDIT_HMAC_KEY must be at least 32 characters when workflow writes are enabled.');
+    if (config.recipientPortalEnabled && !config.recipientPortalBaseUrl.startsWith('https://')) blockers.push('RECIPIENT_PORTAL_BASE_URL must use HTTPS when the recipient portal is enabled in production.');
     if (config.notificationProvider === 'console') blockers.push('Console notifications are not permitted in production.');
   }
 
   if (config.automationEnabled && !config.databaseUrl) blockers.push('DATABASE_URL is required when autonomous operations are enabled.');
+  if (config.recipientPortalEnabled && !config.databaseUrl) blockers.push('DATABASE_URL is required when the recipient portal is enabled.');
+  if (config.recipientPortalEnabled && config.auditHmacKey.length < 32) blockers.push('AUDIT_HMAC_KEY must be at least 32 characters when the recipient portal is enabled.');
+  if (config.recipientPortalEnabled && config.encryptionKey.length < 32) blockers.push('ENCRYPTION_KEY must be at least 32 characters when the recipient portal is enabled.');
+  if (config.recipientPortalEnabled && !config.recipientPortalBaseUrl) blockers.push('RECIPIENT_PORTAL_BASE_URL is required when the recipient portal is enabled.');
+  if (config.offerTokenTtlHours > 720) blockers.push('OFFER_TOKEN_TTL_HOURS cannot exceed 720 hours.');
   if (!['disabled', 'console', 'twilio'].includes(config.notificationProvider)) blockers.push(`Unsupported NOTIFICATION_PROVIDER: ${config.notificationProvider}`);
   if (!['disabled', 'manual'].includes(config.paymentProvider)) blockers.push(`Unsupported PAYMENT_PROVIDER: ${config.paymentProvider}`);
   if (config.notificationProvider === 'twilio') {
@@ -71,6 +81,7 @@ export function assessReadiness(config) {
   }
   if (config.enableWorkflowWrites && config.paymentProvider === 'disabled') warnings.push('Workflow writes are enabled while payments are disabled; grants can progress only to acceptance/compliance workflows.');
   if (config.enableWorkflowWrites && config.notificationProvider === 'disabled') warnings.push('Workflow writes are enabled while notifications are disabled; offers must be surfaced through another recipient channel.');
+  if (config.enableWorkflowWrites && config.notificationProvider !== 'disabled' && !config.recipientPortalEnabled) warnings.push('Recipient notifications are enabled without the no-account recipient portal; messages cannot include secure one-click offer links.');
   if (config.automationEnabled && config.notificationProvider === 'disabled') warnings.push('Autonomous operations are enabled but recipient notifications are disabled.');
   if (config.enableT3010Sync && !config.automationEnabled) warnings.push('T3010 synchronization is enabled but autonomous operations are off; refreshes require a manual sync action.');
   if (config.craStatusMaxAgeHours > 72) warnings.push('CRA status verification age exceeds 72 hours; consider a tighter release-time verification window.');

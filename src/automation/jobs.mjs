@@ -2,6 +2,14 @@ import crypto from 'node:crypto';
 import { decryptText } from '../security/crypto.mjs';
 import { ingestT3010 } from '../t3010/importer.mjs';
 import { RESOURCE_KINDS } from '../t3010/constants.mjs';
+import { ensureOfferAccess } from '../workflow/offer_access.mjs';
+
+function offerMessage(notification, access) {
+  const prefix = notification.channel === 'voice'
+    ? 'A funding offer is available for your organization. This is not a request to submit an application. Your secure response link is '
+    : 'A funding offer is available for your organization. No grant application is required. Review and respond securely: ';
+  return `${prefix}${access.url} . The link expires ${new Date(access.expiresAt).toLocaleDateString('en-CA')}. Do not forward the link.`;
+}
 
 export async function dispatchNotificationsJob({ config, repository, provider }) {
   if (config.notificationProvider === 'disabled') return { skipped: true, reason: 'notification_provider_disabled' };
@@ -10,10 +18,23 @@ export async function dispatchNotificationsJob({ config, repository, provider })
   let sent = 0;
   let failed = 0;
   let retried = 0;
+  let secureOfferLinks = 0;
   for (const notification of queued) {
     try {
       const to = decryptText(notification.recipient, config.encryptionKey);
-      const body = notification.payload?.message || 'A funding offer is available for your organization.';
+      let body = notification.payload?.message || 'A funding offer is available for your organization.';
+      if (notification.template === 'grant_offer' && config.recipientPortalEnabled) {
+        if (!notification.grant_id) throw new Error('Grant-offer notification is missing grant_id.');
+        const access = await ensureOfferAccess({
+          repository,
+          grantId: notification.grant_id,
+          portalBaseUrl: config.recipientPortalBaseUrl,
+          ttlHours: config.offerTokenTtlHours,
+          requestId: `notification:${notification.id}`
+        });
+        body = offerMessage(notification, access);
+        secureOfferLinks += 1;
+      }
       const delivered = await provider.send({ channel: notification.channel, to, body });
       await repository.markNotificationSent(notification.id, delivered.providerMessageId, lockToken);
       sent += 1;
@@ -24,7 +45,7 @@ export async function dispatchNotificationsJob({ config, repository, provider })
       if (retry) retried += 1;
     }
   }
-  return { processed: queued.length, sent, failed, retried };
+  return { processed: queued.length, sent, failed, retried, secureOfferLinks };
 }
 
 export async function syncT3010Job({ config, dataDir, year }) {
@@ -53,8 +74,8 @@ export async function maintenanceJob({ pool }) {
     `),
     pool.query(`
       UPDATE offer_access_tokens
-      SET used_at=COALESCE(used_at, now())
-      WHERE used_at IS NULL AND expires_at < now() - interval '30 days'
+      SET revoked_at=COALESCE(revoked_at, now())
+      WHERE used_at IS NULL AND revoked_at IS NULL AND expires_at < now()
       RETURNING id
     `),
     pool.query("DELETE FROM automation_worker_heartbeats WHERE heartbeat_at < now() - interval '7 days' RETURNING worker_id")
