@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { buildFoundationPortfolio, materializePortfolioDrafts } from '../workflow/portfolio_workflow.mjs';
+import { registerAllocationPolicyTools } from './policy_tools.mjs';
 
 const readOnly = { readOnlyHint: true, openWorldHint: false, destructiveHint: false };
 const consequential = { readOnlyHint: false, openWorldHint: false, destructiveHint: true };
@@ -47,4 +48,6 @@ export function registerPortfolioTools(server, { service, actor }) {
   }, async args => result('Created grant drafts from the reviewed allocation plan. No grants were proposed, approved, offered, notified, or paid.', {
     portfolioDrafts: await materializePortfolioDrafts(service, actor, args)
   }));
+
+  registerAllocationPolicyTools(server, { repository: service.repository, actor });
 }
