@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import path from 'node:path';
 import { createDatabasePool } from '../src/db/pool.mjs';
+import { assertDatabaseSchema } from '../src/db/schema_readiness.mjs';
 import { WorkflowRepository } from '../src/db/workflow_repository.mjs';
 import { loadRuntimeConfig, assessReadiness } from '../src/config/requirements.mjs';
 import { createNotificationProvider } from '../src/integrations/notification.mjs';
@@ -26,6 +27,7 @@ if (!readiness.ready) {
 if (!config.databaseUrl) throw new Error('DATABASE_URL is required when autonomous operations are enabled.');
 
 const pool = createDatabasePool(config.databaseUrl);
+await assertDatabaseSchema(pool);
 const scheduler = new AutomationScheduler(pool, { leaseSeconds: config.automationLeaseSeconds });
 const repository = new WorkflowRepository(pool, { auditHmacKey: config.auditHmacKey, encryptionKey: config.encryptionKey });
 const provider = config.notificationProvider === 'disabled' ? null : createNotificationProvider(config);
@@ -64,9 +66,7 @@ async function runWithLeaseRenewal(job, work) {
   timer.unref?.();
   try {
     const result = await work();
-    if (renewing) {
-      while (renewing) await sleep(10);
-    }
+    if (renewing) while (renewing) await sleep(10);
     if (leaseLost) throw new Error(`Automation lease for ${job.name} was lost while work was running.`);
     if (renewalError) {
       const finalRenewal = await scheduler.renewLease(job.name, workerId);
@@ -94,12 +94,7 @@ async function cycle() {
       results.push({ name: job.name, status, result });
     } catch (error) {
       const recorded = await scheduler.fail(job.name, workerId, error).catch(() => null);
-      results.push({
-        name: job.name,
-        status: 'failed',
-        error: error.message,
-        leaseFailureRecorded: Boolean(recorded)
-      });
+      results.push({ name: job.name, status: 'failed', error: error.message, leaseFailureRecorded: Boolean(recorded) });
     }
   }
   await scheduler.heartbeat(workerId, 'idle', { jobsProcessed: jobs.length });
@@ -121,9 +116,7 @@ async function main() {
   }
 }
 
-for (const signal of ['SIGTERM','SIGINT']) {
-  process.on(signal, () => { stopping = true; });
-}
+for (const signal of ['SIGTERM','SIGINT']) process.on(signal, () => { stopping = true; });
 
 try {
   await main();
