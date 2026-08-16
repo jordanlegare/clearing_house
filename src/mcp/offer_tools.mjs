@@ -10,12 +10,12 @@ const result = (message, data = {}) => ({ structuredContent: data, content: [{ t
 export function registerOfferBatchTools(server, { service, actor }) {
   server.registerTool('create_grant_offer_batch', {
     title: 'Create recipient offer batch',
-    description: 'Attach one reviewed terms version to an approved grant review bundle. The autonomous worker will use only verified recipient contact channels; unverified public T3010 contacts receive a separate verification challenge first. Creating the batch does not itself accept grants or move money.',
+    description: 'Attach one reviewed terms version to an approved grant review bundle. The autonomous worker will use only verified recipient email, SMS, or voice channels; unverified public contacts receive a separate proof-of-control challenge first. Creating the batch does not itself accept grants or move money.',
     inputSchema: {
       reviewBundleId: uuid,
       termsVersion: z.string().min(1).max(100),
       termsText: z.string().min(10).max(50_000),
-      preferredChannel: z.enum(['sms','voice']).default('sms'),
+      preferredChannel: z.enum(['email','sms','voice']).default('email'),
       idempotencyKey
     },
     annotations: consequential
