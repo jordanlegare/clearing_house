@@ -34,43 +34,29 @@ jobs:
       - name: Production readiness fails closed without workflow identity/secrets
         shell: bash
         run: |
-          if NODE_ENV=production \
-            PUBLIC_BASE_URL=https://clearing.example.ca \
-            DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/clearing_house_test \
-            ENABLE_WORKFLOW_WRITES=1 \
-            npm run readiness; then
-            echo "readiness unexpectedly passed insecure write configuration"
-            exit 1
+          if NODE_ENV=production PUBLIC_BASE_URL=https://clearing.example.ca DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/clearing_house_test ENABLE_WORKFLOW_WRITES=1 npm run readiness; then
+            echo "readiness unexpectedly passed insecure write configuration"; exit 1
           fi
       - name: Production authenticated workflow readiness can pass
         run: |
-          NODE_ENV=production \
-          PUBLIC_BASE_URL=https://clearing.example.ca \
-          DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/clearing_house_test \
-          ENABLE_WORKFLOW_WRITES=1 \
-          OIDC_ISSUER=https://id.example.ca \
-          OIDC_CLIENT_ID=clearing-house \
-          OIDC_AUDIENCE=https://clearing.example.ca/mcp \
-          ENCRYPTION_KEY=eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee \
-          AUDIT_HMAC_KEY=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
-          PAYMENT_PROVIDER=manual \
-          npm run readiness
+          NODE_ENV=production PUBLIC_BASE_URL=https://clearing.example.ca DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/clearing_house_test \
+          ENABLE_WORKFLOW_WRITES=1 OIDC_ISSUER=https://id.example.ca OIDC_CLIENT_ID=clearing-house OIDC_AUDIENCE=https://clearing.example.ca/mcp \
+          ENCRYPTION_KEY=eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee AUDIT_HMAC_KEY=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa PAYMENT_PROVIDER=manual npm run readiness
       - name: Production recipient portal readiness can pass
         run: |
-          NODE_ENV=production \
-          PUBLIC_BASE_URL=https://clearing.example.ca \
-          DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/clearing_house_test \
-          RECIPIENT_PORTAL_ENABLED=1 \
-          RECIPIENT_PORTAL_BASE_URL=https://offers.example.ca \
-          ENCRYPTION_KEY=eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee \
-          AUDIT_HMAC_KEY=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
-          npm run readiness
+          NODE_ENV=production PUBLIC_BASE_URL=https://clearing.example.ca DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/clearing_house_test \
+          RECIPIENT_PORTAL_ENABLED=1 RECIPIENT_PORTAL_BASE_URL=https://offers.example.ca ENCRYPTION_KEY=eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee \
+          AUDIT_HMAC_KEY=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa npm run readiness
+      - name: Production automated allocation readiness can pass
+        run: |
+          NODE_ENV=production PUBLIC_BASE_URL=https://clearing.example.ca DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/clearing_house_test \
+          AUTOMATION_ENABLED=1 AUTOMATED_PORTFOLIOS_ENABLED=1 ENABLE_WORKFLOW_WRITES=1 \
+          OIDC_ISSUER=https://id.example.ca OIDC_CLIENT_ID=clearing-house OIDC_AUDIENCE=https://clearing.example.ca/mcp \
+          ENCRYPTION_KEY=eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee AUDIT_HMAC_KEY=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa npm run readiness
       - name: Apply PostgreSQL migrations
         run: |
           for migration in db/migrations/*.sql; do
-            docker run --rm --network host \
-              -e PGPASSWORD=postgres \
-              -v "$PWD:/work" -w /work postgres:16 \
+            docker run --rm --network host -e PGPASSWORD=postgres -v "$PWD:/work" -w /work postgres:16 \
               psql -h 127.0.0.1 -U postgres -d clearing_house_test -v ON_ERROR_STOP=1 -f "$migration"
           done
       - name: Workflow database end-to-end smoke
@@ -85,6 +71,12 @@ jobs:
           ENCRYPTION_KEY: eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
           AUDIT_HMAC_KEY: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
         run: npm run test:portal-db
+      - name: Autonomous allocation policy database smoke
+        env:
+          DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/clearing_house_test
+          ENCRYPTION_KEY: eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+          AUDIT_HMAC_KEY: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+        run: npm run test:allocation-policy-db
       - name: Autonomous worker single-cycle smoke
         env:
           DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/clearing_house_test
@@ -103,24 +95,15 @@ jobs:
           AUDIT_HMAC_KEY: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
         run: |
           npm run portal > /tmp/recipient-portal.log 2>&1 &
-          pid=$!
-          trap 'kill $pid 2>/dev/null || true' EXIT
-          for i in {1..20}; do
-            if curl -fsS http://127.0.0.1:3102/healthz > /tmp/portal-health.json; then break; fi
-            sleep 0.5
-          done
-          cat /tmp/portal-health.json
-          grep 'recipient-portal' /tmp/portal-health.json
+          pid=$!; trap 'kill $pid 2>/dev/null || true' EXIT
+          for i in {1..20}; do if curl -fsS http://127.0.0.1:3102/healthz > /tmp/portal-health.json; then break; fi; sleep 0.5; done
+          cat /tmp/portal-health.json; grep 'recipient-portal' /tmp/portal-health.json
       - name: MCP public protocol smoke
         shell: bash
         run: |
           PORT=3100 npm start > /tmp/clearing-house.log 2>&1 &
-          pid=$!
-          trap 'kill $pid 2>/dev/null || true' EXIT
-          for i in {1..20}; do
-            if curl -fsS http://127.0.0.1:3100/healthz > /tmp/health.json; then break; fi
-            sleep 0.5
-          done
+          pid=$!; trap 'kill $pid 2>/dev/null || true' EXIT
+          for i in {1..20}; do if curl -fsS http://127.0.0.1:3100/healthz > /tmp/health.json; then break; fi; sleep 0.5; done
           cat /tmp/health.json
           MCP_URL=http://127.0.0.1:3100/mcp node scripts/mcp-client-smoke.mjs
       - name: Authenticated MCP endpoint fails closed without bearer token
@@ -138,13 +121,8 @@ jobs:
           PAYMENT_PROVIDER: manual
         run: |
           npm start > /tmp/clearing-house-auth.log 2>&1 &
-          pid=$!
-          trap 'kill $pid 2>/dev/null || true' EXIT
-          for i in {1..20}; do
-            if curl -fsS http://127.0.0.1:3101/healthz >/dev/null; then break; fi
-            sleep 0.5
-          done
+          pid=$!; trap 'kill $pid 2>/dev/null || true' EXIT
+          for i in {1..20}; do if curl -fsS http://127.0.0.1:3101/healthz >/dev/null; then break; fi; sleep 0.5; done
           curl -fsS http://127.0.0.1:3101/.well-known/oauth-protected-resource | grep 'authorization_servers'
           code=$(curl -sS -o /tmp/unauth.json -w '%{http_code}' -X POST http://127.0.0.1:3101/mcp -H 'content-type: application/json' --data '{}')
-          cat /tmp/unauth.json
-          test "$code" = "401"
+          cat /tmp/unauth.json; test "$code" = "401"

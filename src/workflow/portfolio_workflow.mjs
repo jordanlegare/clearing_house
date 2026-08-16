@@ -19,7 +19,8 @@ export async function buildFoundationPortfolio(service, actor, {
   maxGrantCad = 250_000,
   maxRecipients = 100,
   minimumScore = 0,
-  purpose = 'General operating support'
+  purpose = 'General operating support',
+  excludedBusinessNumbers = []
 }) {
   requireOrgPermission(actor, foundationOrgId, PERMISSIONS.PROPOSE_GRANT);
   if (!service.t3010Repository?.loaded) throw new Error('T3010 repository must be loaded to build a recipient portfolio.');
@@ -29,12 +30,14 @@ export async function buildFoundationPortfolio(service, actor, {
   const foundationBn = normalizeCharityBn(foundationOrg.business_number);
   if (!foundationBn) throw new Error('Foundation organization must have a valid registered-charity BN before portfolio matching.');
 
-  const matchLimit = Math.min(500, Math.max(maxRecipients * 5, 100));
+  const excluded = new Set((excludedBusinessNumbers || []).map(normalizeCharityBn).filter(Boolean));
+  const matchLimit = Math.min(500, Math.max(maxRecipients * 5 + excluded.size, 100));
   const match = service.t3010Repository.matchFoundation({ foundationBn, focus, province, limit: matchLimit });
+  const filteredMatches = match.matches.filter(candidate => !excluded.has(normalizeCharityBn(candidate.businessNumber || candidate.bn)));
   const plan = buildPortfolioPlan({
     foundationOrgId,
     budgetCad,
-    candidates: match.matches,
+    candidates: filteredMatches,
     minGrantCad,
     maxGrantCad,
     maxRecipients,
@@ -49,6 +52,8 @@ export async function buildFoundationPortfolio(service, actor, {
       confidence: match.confidence,
       evidenceTokens: match.evidenceTokens,
       candidateCountBeforeConstraints: match.matches.length,
+      candidateCountAfterExclusions: filteredMatches.length,
+      excludedPriorRecipients: match.matches.length - filteredMatches.length,
       note: 'Planning support only. Public T3010 evidence and explicit constraints do not constitute an award, current legal-status verification, or CRA approval.'
     },
     hashMeaning: 'Integrity binding only: planHash binds the foundation, purpose and cent-denominated allocations. It is not proof that a foundation approved the plan.'
