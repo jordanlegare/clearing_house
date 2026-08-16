@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { registerPortfolioTools } from './portfolio_tools.mjs';
 import {
   approveNqdDiligence,
   createManualPaymentIntent,
@@ -39,6 +40,8 @@ export function registerWorkflowTools(server, { service, actor }) {
     description: 'Fetch an authenticated grant workflow record, including current terms, compliance decision and authoritative recipient-status evidence when available.',
     inputSchema: { grantId: uuid }, annotations: readOnly
   }, async ({ grantId }) => result('Returned grant workflow record.', { grant: await service.getGrant(actor, grantId) }));
+
+  registerPortfolioTools(server, { service, actor });
 
   server.registerTool('claim_recipient_organization', {
     title: 'Claim a registered charity profile',
