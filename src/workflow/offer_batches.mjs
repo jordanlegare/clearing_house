@@ -3,6 +3,7 @@ import { buildAuditEntry } from '../security/audit.mjs';
 import { PERMISSIONS, requireOrgPermission } from '../security/rbac.mjs';
 import { getReviewBundle } from './review_bundles.mjs';
 import { findVerifiedRecipientContact, seedPublicRecipientContacts, ensureContactVerification } from './recipient_contacts.mjs';
+import { seedWebsiteRecipientContacts } from '../integrations/website_contact.mjs';
 
 function termsDigest(text) {
   return crypto.createHash('sha256').update(String(text || '')).digest('hex');
@@ -223,14 +224,32 @@ export async function runOneOfferBatch({ config, repository, batchId, t3010Repos
 
     const contact = await findVerifiedRecipientContact(repository, item.recipientOrgId, batch.preferredChannel);
     if (!contact) {
-      const challenge = await ensureContactVerification(repository, {
+      let enrichment = null;
+      let challenge = await ensureContactVerification(repository, {
         organizationId: item.recipientOrgId,
         preferredChannel: batch.preferredChannel,
         portalBaseUrl: config.recipientPortalBaseUrl,
         ttlHours: Math.min(config.offerTokenTtlHours || 72, 168)
       });
+      if (!challenge.pending && challenge.reason === 'no_contact_candidate' && config.websiteContactEnrichmentEnabled) {
+        enrichment = await seedWebsiteRecipientContacts(repository, t3010Repository, item.recipientOrgId, {
+          enabled: true,
+          timeoutMs: config.websiteContactTimeoutMs,
+          maxBytes: config.websiteContactMaxBytes,
+          maxPages: config.websiteContactMaxPages
+        });
+        challenge = await ensureContactVerification(repository, {
+          organizationId: item.recipientOrgId,
+          preferredChannel: batch.preferredChannel,
+          portalBaseUrl: config.recipientPortalBaseUrl,
+          ttlHours: Math.min(config.offerTokenTtlHours || 72, 168)
+        });
+      }
+      const reason = challenge.pending
+        ? 'Awaiting recipient contact verification'
+        : enrichment?.reason || challenge.reason || 'No verified recipient contact is available';
       await repository.pool.query(`UPDATE grant_offer_batch_items SET status='pending_contact',last_error=$3,updated_at=now() WHERE batch_id=$1 AND grant_id=$2`,
-        [batch.id, item.grantId, challenge.reason || 'Awaiting recipient contact verification']);
+        [batch.id, item.grantId, String(reason).slice(0, 4000)]);
       pending += 1;
       continue;
     }

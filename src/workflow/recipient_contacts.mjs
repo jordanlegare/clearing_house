@@ -10,7 +10,7 @@ export class ContactChallengeError extends Error {
   }
 }
 
-function normalizedDestination(channel, value) {
+export function normalizeContactDestination(channel, value) {
   const text = String(value || '').trim();
   if (!['sms','voice'].includes(channel)) throw new Error('Contact channel must be sms or voice.');
   const digits = text.replace(/\D/g, '');
@@ -19,7 +19,7 @@ function normalizedDestination(channel, value) {
   throw new Error('Recipient phone contact must be a valid Canada/US E.164-compatible number.');
 }
 
-function fingerprint(repository, channel, destination) {
+export function contactFingerprint(repository, channel, destination) {
   if (!repository.auditHmacKey || repository.auditHmacKey.length < 32) throw new Error('AUDIT_HMAC_KEY is required for contact fingerprints.');
   return crypto.createHmac('sha256', repository.auditHmacKey).update(`${channel}|${destination}`).digest('hex');
 }
@@ -68,6 +68,55 @@ async function appendAudit(repository, client, { actor = null, organizationId, a
     entry.payloadDigest, entry.previousDigest, entry.entryHmac]);
 }
 
+export async function upsertRecipientContactCandidate(repository, {
+  organizationId,
+  channel,
+  destination,
+  source,
+  sourceEvidence = {},
+  actor = null
+}) {
+  if (!organizationId) throw new Error('organizationId is required for recipient contact candidates.');
+  const normalized = normalizeContactDestination(channel, destination);
+  const fp = contactFingerprint(repository, channel, normalized);
+  const encrypted = encryptText(normalized, repository.encryptionKey);
+  const client = await repository.pool.connect();
+  try {
+    await client.query('BEGIN');
+    let row = (await client.query(`
+      INSERT INTO recipient_contacts
+        (organization_id,channel,destination_encrypted,destination_fingerprint,source,source_evidence)
+      VALUES ($1,$2,$3,$4,$5,$6::jsonb)
+      ON CONFLICT (organization_id,channel,destination_fingerprint) DO NOTHING
+      RETURNING *
+    `, [organizationId, channel, encrypted, fp, source, JSON.stringify(sourceEvidence)])).rows[0];
+    const inserted = Boolean(row);
+    if (!row) {
+      row = (await client.query(`
+        SELECT * FROM recipient_contacts
+        WHERE organization_id=$1 AND channel=$2 AND destination_fingerprint=$3
+      `, [organizationId, channel, fp])).rows[0];
+    }
+    if (!row) throw new Error('Recipient contact candidate could not be stored.');
+    if (inserted) {
+      await appendAudit(repository, client, {
+        actor,
+        organizationId,
+        action: 'recipient_contact.candidate_added',
+        resourceType: 'recipient_contact',
+        resourceId: row.id,
+        requestId: `recipient-contact:${row.id}:candidate`,
+        payload: { channel, source, sourceEvidence }
+      });
+    }
+    await client.query('COMMIT');
+    return { id: row.id, inserted, organizationId, channel: row.channel, source: row.source, status: row.status, destination: '[encrypted]' };
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw error;
+  } finally { client.release(); }
+}
+
 async function queueContactVerificationNotification(repository, client, { organizationId, contact, destination, challenge }) {
   if (!organizationId || !contact?.id || !challenge?.id) throw new Error('Contact-verification notification requires organization, contact and challenge identifiers.');
   if (!['sms','voice'].includes(contact.channel)) throw new Error('Contact-verification notification requires an SMS or voice channel.');
@@ -95,22 +144,20 @@ export async function seedPublicRecipientContacts(repository, t3010Repository, o
     if (!organization.business_number) continue;
     const profile = t3010Repository.charityProfile(organization.business_number);
     for (const candidate of profile?.publicContactCandidates || []) {
-      let destination;
-      try { destination = normalizedDestination(candidate.channel, candidate.destination); } catch { continue; }
-      const fp = fingerprint(repository, candidate.channel, destination);
-      const encrypted = encryptText(destination, repository.encryptionKey);
-      const inserted = await repository.pool.query(`
-        INSERT INTO recipient_contacts
-          (organization_id,channel,destination_encrypted,destination_fingerprint,source,source_evidence)
-        VALUES ($1,$2,$3,$4,'t3010_public',$5::jsonb)
-        ON CONFLICT (organization_id,channel,destination_fingerprint) DO NOTHING
-        RETURNING id
-      `, [organization.id, candidate.channel, encrypted, fp, JSON.stringify({
-        sourceYear: profile.sourceYear,
-        sourceKey: candidate.sourceKey,
-        publicSource: 'CRA T3010/Open Government Canada'
-      })]);
-      candidates += inserted.rowCount;
+      try {
+        const stored = await upsertRecipientContactCandidate(repository, {
+          organizationId: organization.id,
+          channel: candidate.channel,
+          destination: candidate.destination,
+          source: 't3010_public',
+          sourceEvidence: {
+            sourceYear: profile.sourceYear,
+            sourceKey: candidate.sourceKey,
+            publicSource: 'CRA T3010/Open Government Canada'
+          }
+        });
+        if (stored.inserted) candidates += 1;
+      } catch { /* malformed public contact evidence is skipped, never guessed */ }
     }
   }
   return { organizations: organizations.length, candidates };
@@ -249,7 +296,7 @@ export async function verifyContactChallenge(repository, rawToken) {
   try {
     await client.query('BEGIN');
     const { rows } = await client.query(`
-      SELECT c.*,rc.organization_id,rc.channel,rc.destination_encrypted,o.legal_name
+      SELECT c.*,rc.organization_id,rc.channel,rc.destination_encrypted,rc.source,o.legal_name
       FROM recipient_contact_challenges c
       JOIN recipient_contacts rc ON rc.id=c.contact_id
       JOIN organizations o ON o.id=rc.organization_id
@@ -258,19 +305,20 @@ export async function verifyContactChallenge(repository, rawToken) {
     `, [tokenHash(token)]);
     const row = rows[0];
     if (!row || row.used_at || row.revoked_at || new Date(row.expires_at).getTime() <= Date.now()) throw new ContactChallengeError();
+    const verificationMethod = row.source === 'website_public' ? 'public_website_channel_control' : 'public_t3010_channel_control';
     await client.query(`UPDATE recipient_contact_challenges SET used_at=now() WHERE id=$1`, [row.id]);
     await client.query(`UPDATE recipient_contact_challenges SET revoked_at=COALESCE(revoked_at,now()) WHERE contact_id=$1 AND id<>$2 AND used_at IS NULL AND revoked_at IS NULL`, [row.contact_id, row.id]);
     await client.query(`
-      UPDATE recipient_contacts SET status='verified',verification_method='public_t3010_channel_control',verified_at=now(),updated_at=now()
+      UPDATE recipient_contacts SET status='verified',verification_method=$2,verified_at=now(),updated_at=now()
       WHERE id=$1
-    `, [row.contact_id]);
+    `, [row.contact_id, verificationMethod]);
     await appendAudit(repository, client, {
       organizationId: row.organization_id,
       action: 'recipient_contact.verified',
       resourceType: 'recipient_contact',
       resourceId: row.contact_id,
       requestId: `contact-challenge:${row.id}:verify`,
-      payload: { channel: row.channel, verificationMethod: 'public_t3010_channel_control' }
+      payload: { channel: row.channel, source: row.source, verificationMethod }
     });
     await client.query('COMMIT');
     return {
