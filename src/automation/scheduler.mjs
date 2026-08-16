@@ -4,6 +4,12 @@ export function jobDefinitions(config) {
   const enabled = Boolean(config.automationEnabled);
   return [
     {
+      name: 'allocation_policies',
+      enabled: enabled && config.automatedPortfoliosEnabled,
+      intervalSeconds: config.allocationPolicyPollSeconds,
+      metadata: { purpose: 'Keep pre-authorized foundation allocation envelopes filled with draft grants only.' }
+    },
+    {
       name: 'notifications',
       enabled: enabled && config.notificationProvider !== 'disabled',
       intervalSeconds: config.notificationPollSeconds,
