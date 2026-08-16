@@ -74,6 +74,9 @@ jobs:
       - name: DQ-backed envelope database smoke
         env: *db-env
         run: npm run test:dq-envelope-db
+      - name: Batch proposal and review-bundle approval smoke
+        env: *db-env
+        run: npm run test:review-bundle-db
       - name: Autonomous worker single-cycle smoke
         env:
           DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/clearing_house_test
