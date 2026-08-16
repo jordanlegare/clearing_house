@@ -9,6 +9,19 @@ ALTER TABLE offer_access_tokens
   ADD COLUMN IF NOT EXISTS created_by uuid REFERENCES users(id),
   ADD COLUMN IF NOT EXISTS revoked_at timestamptz;
 
+-- Earlier experimental branches could have produced more than one unused token for a
+-- grant. Retire every older token before adding the one-active-capability invariant.
+WITH ranked AS (
+  SELECT id,
+    row_number() OVER (PARTITION BY grant_id ORDER BY created_at DESC, id DESC) AS rn
+  FROM offer_access_tokens
+  WHERE used_at IS NULL AND revoked_at IS NULL
+)
+UPDATE offer_access_tokens t
+SET revoked_at=now()
+FROM ranked r
+WHERE t.id=r.id AND r.rn > 1;
+
 CREATE INDEX IF NOT EXISTS offer_access_active_grant_idx
   ON offer_access_tokens(grant_id, expires_at DESC)
   WHERE used_at IS NULL AND revoked_at IS NULL;
