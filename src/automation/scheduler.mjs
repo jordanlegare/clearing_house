@@ -45,8 +45,9 @@ export function jobDefinitions(config) {
 export class AutomationScheduler {
   constructor(pool, { leaseSeconds = 300 } = {}) {
     if (!pool) throw new Error('AutomationScheduler requires a database pool.');
+    if (!Number.isInteger(Number(leaseSeconds)) || Number(leaseSeconds) < 3) throw new Error('Automation lease must be at least 3 seconds.');
     this.pool = pool;
-    this.leaseSeconds = leaseSeconds;
+    this.leaseSeconds = Number(leaseSeconds);
   }
 
   async configureJobs(definitions) {
@@ -103,6 +104,17 @@ export class AutomationScheduler {
     });
   }
 
+  async renewLease(jobName, workerId) {
+    const updated = await this.pool.query(`
+      UPDATE automation_jobs SET
+        locked_until=now() + ($3 * interval '1 second'),
+        updated_at=now()
+      WHERE name=$1 AND locked_by=$2 AND locked_until >= now()
+      RETURNING name,locked_by,locked_until
+    `, [jobName, workerId, this.leaseSeconds]);
+    return updated.rows[0] || null;
+  }
+
   async complete(jobName, workerId, result = {}, status = 'success') {
     const updated = await this.pool.query(`
       UPDATE automation_jobs SET
@@ -114,10 +126,10 @@ export class AutomationScheduler {
         last_result=$4::jsonb,
         next_run_at=now() + (interval_seconds * interval '1 second'),
         updated_at=now()
-      WHERE name=$1 AND locked_by=$2
+      WHERE name=$1 AND locked_by=$2 AND locked_until >= now()
       RETURNING *
     `, [jobName, workerId, status, JSON.stringify(result)]);
-    if (!updated.rows[0]) throw new Error(`Automation lease for ${jobName} is no longer owned by ${workerId}.`);
+    if (!updated.rows[0]) throw new Error(`Automation lease for ${jobName} is expired, lost, or no longer owned by ${workerId}.`);
     return updated.rows[0];
   }
 
@@ -132,7 +144,7 @@ export class AutomationScheduler {
         last_error=$3,
         next_run_at=now() + (LEAST(interval_seconds, 300) * interval '1 second'),
         updated_at=now()
-      WHERE name=$1 AND locked_by=$2
+      WHERE name=$1 AND locked_by=$2 AND locked_until >= now()
       RETURNING *
     `, [jobName, workerId, message]);
     return updated.rows[0] || null;

@@ -29,6 +29,12 @@ jobs:
       - run: npm install
       - run: npm run check
       - run: npm test
+      - name: Docker Compose configuration is valid
+        run: docker compose config >/tmp/clearing-house-compose.yml
+      - name: Build production container image
+        run: docker build -t clearing-house-ci .
+      - name: Production container runs as non-root
+        run: docker run --rm --entrypoint node clearing-house-ci -e "if (process.getuid?.() === 0) process.exit(1); console.log(process.getuid?.())"
       - name: Development readiness
         run: npm run readiness
       - name: Production readiness fails closed without workflow identity/secrets
@@ -59,11 +65,14 @@ jobs:
             docker run --rm --network host -e PGPASSWORD=postgres -v "$PWD:/work" -w /work postgres:16 \
               psql -h 127.0.0.1 -U postgres -d clearing_house_test -v ON_ERROR_STOP=1 -f "$migration"
           done
-      - name: Workflow database end-to-end smoke
+      - name: Database schema readiness gate
         env: &db-env
           DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/clearing_house_test
           ENCRYPTION_KEY: eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
           AUDIT_HMAC_KEY: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+        run: npm run schema:check
+      - name: Workflow database end-to-end smoke
+        env: *db-env
         run: npm run test:db
       - name: Recipient no-account offer lifecycle smoke
         env: *db-env
