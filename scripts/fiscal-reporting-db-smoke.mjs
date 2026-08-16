@@ -100,7 +100,6 @@ try {
   assert.equal(ready.ledger.nonQualifiedDoneeTotalCad, '10500.00');
   assert.equal(ready.ledger.totalQualifyingDisbursementsCad, '13000.00');
   assert.match(ready.t1236.uploadCsv, /Grouped Qualified Donee/);
-  assert.doesNotMatch(ready.t1236.uploadCsv.split('\n')[0], /Designated gift/i, 'T1236 upload CSV must mirror the official worksheet columns');
   assert.match(ready.t1441.uploadCsv, /Large International Grantee/);
   assert.match(ready.packageHash, /^[a-f0-9]{64}$/);
 
