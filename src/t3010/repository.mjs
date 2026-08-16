@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import readline from 'node:readline';
 import { createReadStream } from 'node:fs';
-import { extractCity, extractDesignation, extractName, extractProvince, numericFields, firstField } from './normalize.mjs';
+import { extractCity, extractDesignation, extractName, extractProvince, numericFields, firstField, extractPhoneCandidates } from './normalize.mjs';
 
 const STOP = new Set('the and for with from this that those these de la le les des du et pour une un dans sur of to a an in on by at is are be as or canada canadian foundation charity charitable society association incorporated inc corporation corp trust fund fonds fondation'.split(' '));
 
@@ -26,11 +26,7 @@ function scoreText(queryTokens, text) {
 
 async function readJsonl(file) {
   const rows = [];
-  try {
-    await fs.access(file);
-  } catch {
-    return rows;
-  }
+  try { await fs.access(file); } catch { return rows; }
   const rl = readline.createInterface({ input: createReadStream(file, { encoding: 'utf8' }), crlfDelay: Infinity });
   for await (const line of rl) {
     if (!line.trim()) continue;
@@ -128,6 +124,7 @@ export class T3010Repository {
       fiscalPeriodEnd: firstField(ident.fields, [/fiscal.*period.*end/, /fpe/, /fiscal.*end/]),
       isFoundation: this.foundationByBn.has(bn) || /foundation|fondation/i.test(designation),
       website: web ? firstField(web.fields, [/website/, /web.*url/, /^url$/]) : '',
+      publicContactCandidates: extractPhoneCandidates(ident.fields, web?.fields),
       programDescriptions: programs.slice(0, 8).map(r => firstField(r.fields, [/description/, /program/, /activity/]) || r.name).filter(Boolean),
       financialSignals: financial ? numericFields(financial.fields, /(revenue|expenditure|asset|liabil|gift|grant)/i) : {},
       sourceYear: this.manifest?.year ?? null
@@ -187,15 +184,9 @@ export class T3010Repository {
   matchFoundation({ foundationBn, focus = '', province = '', limit = 25 } = {}) {
     const foundation = this.foundationProfile(foundationBn);
     if (!foundation) throw new Error(`Foundation ${foundationBn} not found in loaded T3010 foundation records`);
-    const evidence = [
-      focus,
-      foundation.name,
-      ...foundation.programDescriptions,
-      ...(this.qualifiedDoneesByBn.get(foundationBn) ?? []).slice(0, 200).map(recordText)
-    ].join(' ');
+    const evidence = [focus, foundation.name, ...foundation.programDescriptions, ...(this.qualifiedDoneesByBn.get(foundationBn) ?? []).slice(0, 200).map(recordText)].join(' ');
     const q = tokens(evidence).slice(0, 120);
     if (!q.length) return { foundation, confidence: 'low', evidenceTokens: [], matches: [], explanation: 'No textual mandate or historical grant evidence was available; supply a focus phrase.' };
-
     const candidates = this.searchCharities({ query: q.join(' '), province, limit: Math.max(limit * 5, 100), includeFoundations: false });
     const matches = candidates.slice(0, limit).map(candidate => {
       const candidateText = [candidate.name, candidate.category, ...candidate.programDescriptions].join(' ');
