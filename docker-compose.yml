@@ -31,14 +31,30 @@ services:
       done'
     restart: "no"
 
+  schema-check:
+    build: .
+    command: npm run schema:check
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/clearing_house
+    restart: "no"
+
   app:
     build: .
     restart: unless-stopped
     depends_on:
-      migrate:
+      schema-check:
         condition: service_completed_successfully
     ports:
       - "${PORT:-3000}:3000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     environment: &app-env
       NODE_ENV: ${NODE_ENV:-development}
       PORT: 3000
@@ -60,6 +76,10 @@ services:
       RECIPIENT_PORTAL_BASE_URL: ${RECIPIENT_PORTAL_BASE_URL:-http://localhost:3001}
       RECIPIENT_PORTAL_PORT: 3001
       OFFER_TOKEN_TTL_HOURS: ${OFFER_TOKEN_TTL_HOURS:-168}
+      WEBSITE_CONTACT_ENRICHMENT_ENABLED: ${WEBSITE_CONTACT_ENRICHMENT_ENABLED:-0}
+      WEBSITE_CONTACT_TIMEOUT_MS: ${WEBSITE_CONTACT_TIMEOUT_MS:-5000}
+      WEBSITE_CONTACT_MAX_PAGES: ${WEBSITE_CONTACT_MAX_PAGES:-4}
+      WEBSITE_CONTACT_MAX_BYTES: ${WEBSITE_CONTACT_MAX_BYTES:-524288}
       OIDC_ISSUER: ${OIDC_ISSUER:-}
       OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-}
       OIDC_AUDIENCE: ${OIDC_AUDIENCE:-}
@@ -83,7 +103,7 @@ services:
     command: npm run ops:worker
     restart: unless-stopped
     depends_on:
-      migrate:
+      schema-check:
         condition: service_completed_successfully
     environment:
       <<: *app-env
@@ -97,10 +117,16 @@ services:
     command: npm run portal
     restart: unless-stopped
     depends_on:
-      migrate:
+      schema-check:
         condition: service_completed_successfully
     ports:
       - "${RECIPIENT_PORTAL_PORT:-3001}:3001"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     environment:
       <<: *app-env
       RECIPIENT_PORTAL_ENABLED: "1"
