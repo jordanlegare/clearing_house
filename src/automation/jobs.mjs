@@ -3,6 +3,7 @@ import { decryptText } from '../security/crypto.mjs';
 import { ingestT3010 } from '../t3010/importer.mjs';
 import { RESOURCE_KINDS } from '../t3010/constants.mjs';
 import { ensureOfferAccess } from '../workflow/offer_access.mjs';
+import { runAllocationPoliciesJob } from './allocation_policies.mjs';
 
 function offerMessage(notification, access) {
   const prefix = notification.channel === 'voice'
@@ -50,44 +51,21 @@ export async function dispatchNotificationsJob({ config, repository, provider })
 
 export async function syncT3010Job({ config, dataDir, year }) {
   if (!config.enableT3010Sync) return { skipped: true, reason: 't3010_sync_disabled' };
-  const manifest = await ingestT3010({
-    year,
-    outputDir: dataDir,
-    resources: RESOURCE_KINDS,
-    maxRows: 0
-  });
-  return {
-    year: manifest.year,
-    datasetId: manifest.datasetId,
-    resources: manifest.resources?.length || 0,
-    completedAt: new Date().toISOString()
-  };
+  const manifest = await ingestT3010({ year, outputDir: dataDir, resources: RESOURCE_KINDS, maxRows: 0 });
+  return { year: manifest.year, datasetId: manifest.datasetId, resources: manifest.resources?.length || 0, completedAt: new Date().toISOString() };
 }
 
 export async function maintenanceJob({ pool }) {
   const [notifications, tokens, workers] = await Promise.all([
-    pool.query(`
-      UPDATE notification_outbox
-      SET locked_at=NULL, lock_token=NULL
-      WHERE status='queued' AND locked_at < now() - interval '15 minutes'
-      RETURNING id
-    `),
-    pool.query(`
-      UPDATE offer_access_tokens
-      SET revoked_at=COALESCE(revoked_at, now())
-      WHERE used_at IS NULL AND revoked_at IS NULL AND expires_at < now()
-      RETURNING id
-    `),
+    pool.query(`UPDATE notification_outbox SET locked_at=NULL, lock_token=NULL WHERE status='queued' AND locked_at < now() - interval '15 minutes' RETURNING id`),
+    pool.query(`UPDATE offer_access_tokens SET revoked_at=COALESCE(revoked_at, now()) WHERE used_at IS NULL AND revoked_at IS NULL AND expires_at < now() RETURNING id`),
     pool.query("DELETE FROM automation_worker_heartbeats WHERE heartbeat_at < now() - interval '7 days' RETURNING worker_id")
   ]);
-  return {
-    recoveredNotificationLocks: notifications.rowCount,
-    retiredExpiredOfferTokens: tokens.rowCount,
-    removedOldWorkerHeartbeats: workers.rowCount
-  };
+  return { recoveredNotificationLocks: notifications.rowCount, retiredExpiredOfferTokens: tokens.rowCount, removedOldWorkerHeartbeats: workers.rowCount };
 }
 
 export async function runAutomationJob(name, context) {
+  if (name === 'allocation_policies') return runAllocationPoliciesJob(context);
   if (name === 'notifications') return dispatchNotificationsJob(context);
   if (name === 't3010_sync') return syncT3010Job(context);
   if (name === 'maintenance') return maintenanceJob(context);
