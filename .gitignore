@@ -1,0 +1,7 @@
+node_modules/
+.env
+.tmp/
+coverage/
+data/t3010/*/
+!data/t3010/.gitkeep
+.DS_Store

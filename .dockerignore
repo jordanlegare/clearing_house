@@ -1,0 +1,4 @@
+node_modules
+.git
+.tmp
+data/t3010/*
