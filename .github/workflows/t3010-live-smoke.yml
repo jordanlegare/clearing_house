@@ -1,0 +1,23 @@
+name: T3010 live smoke
+on:
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 11 * * 1'
+permissions:
+  contents: read
+jobs:
+  open-canada:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
+      - name: Discover and stream sample CRA T3010 rows from Open Government Canada
+        run: npm run smoke:t3010
+      - uses: actions/upload-artifact@v4
+        with:
+          name: t3010-smoke-manifest
+          path: .tmp/t3010-smoke/manifest.json
