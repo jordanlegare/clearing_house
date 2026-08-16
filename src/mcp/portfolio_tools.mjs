@@ -4,6 +4,7 @@ import { registerAllocationPolicyTools } from './policy_tools.mjs';
 import { registerDqEnvelopeTools } from './dq_tools.mjs';
 import { registerReviewBundleTools } from './review_tools.mjs';
 import { registerOfferBatchTools } from './offer_tools.mjs';
+import { registerOperationalTools } from './ops_tools.mjs';
 
 const readOnly = { readOnlyHint: true, openWorldHint: false, destructiveHint: false };
 const consequential = { readOnlyHint: false, openWorldHint: false, destructiveHint: true };
@@ -52,6 +53,7 @@ export function registerPortfolioTools(server, { service, actor }) {
     portfolioDrafts: await materializePortfolioDrafts(service, actor, args)
   }));
 
+  registerOperationalTools(server, { service, actor });
   registerAllocationPolicyTools(server, { repository: service.repository, actor });
   registerDqEnvelopeTools(server, { service, actor });
   registerReviewBundleTools(server, { service, actor });
