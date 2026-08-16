@@ -1,13 +1,14 @@
 {
   "name": "canadian-philanthropy-clearing-house",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
-  "description": "ChatGPT MCP plugin that ingests CRA T3010 open data and matches Canadian foundations with registered charities and other eligible recipients.",
+  "description": "ChatGPT MCP app that ingests CRA T3010 open data and matches Canadian foundations with registered charities and other eligible recipients.",
   "engines": {"node": ">=22"},
   "scripts": {
     "test": "node --test test/*.test.mjs",
-    "check": "node --check src/mcp/server.mjs && node --check scripts/ingest-t3010.mjs",
+    "check": "node --check src/mcp/server.mjs && node --check scripts/ingest-t3010.mjs && node --check scripts/check-readiness.mjs && node --check src/config/requirements.mjs && node --check src/security/rbac.mjs && node --check src/workflow/grant_lifecycle.mjs && node --check src/compliance/reporting.mjs && node --check src/integrations/notification.mjs && node --check src/integrations/payment.mjs",
+    "readiness": "node scripts/check-readiness.mjs",
     "start": "node src/mcp/server.mjs",
     "ingest:t3010": "node scripts/ingest-t3010.mjs",
     "smoke:t3010": "node scripts/ingest-t3010.mjs --year 2024 --resources identification,foundations,disbursement_quota --max-rows 25 --output .tmp/t3010-smoke"
