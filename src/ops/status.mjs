@@ -77,8 +77,8 @@ async function foundationStatus(repository, foundation) {
   ] = await Promise.all([
     repository.pool.query(`SELECT state,count(*)::int AS count FROM grants WHERE foundation_org_id=$1 GROUP BY state ORDER BY state`, [id]),
     repository.pool.query(`
-      SELECT COALESCE(sum(amount_cad) FILTER (WHERE state NOT IN ('declined')),0) AS active_cad,
-             COALESCE(sum(amount_cad) FILTER (WHERE state='paid'),0) AS paid_cad,
+      SELECT COALESCE(sum(amount_cad) FILTER (WHERE state NOT IN ('declined','cancelled')),0) AS active_cad,
+             COALESCE(sum(amount_cad) FILTER (WHERE state IN ('paid','reported')),0) AS paid_cad,
              COALESCE(sum(amount_cad) FILTER (WHERE state='reported'),0) AS reported_cad
       FROM grants WHERE foundation_org_id=$1
     `, [id]),
@@ -113,7 +113,7 @@ async function foundationStatus(repository, foundation) {
     repository.pool.query(`
       SELECT
         count(*) FILTER (WHERE g.state='accepted' AND COALESCE(cr.decision,'pending') <> 'approved')::int AS accepted_pending_compliance,
-        count(*) FILTER (WHERE g.state='accepted' AND COALESCE(cr.decision,'pending')='approved' AND (rs.id IS NULL OR rs.expires_at <= now() OR rs.status <> 'registered'))::int AS approved_compliance_pending_status
+        count(*) FILTER (WHERE g.state='accepted' AND COALESCE(cr.decision,'pending')='approved' AND (rs.id IS NULL OR rs.expires_at <= now() OR rs.status <> 'eligible'))::int AS approved_compliance_pending_status
       FROM grants g
       LEFT JOIN LATERAL (SELECT decision FROM compliance_reviews WHERE grant_id=g.id ORDER BY created_at DESC LIMIT 1) cr ON true
       LEFT JOIN LATERAL (SELECT id,status,expires_at FROM recipient_status_checks WHERE organization_id=g.recipient_org_id AND assurance_level='authoritative' ORDER BY verified_at DESC LIMIT 1) rs ON true
@@ -193,7 +193,7 @@ function attentionItems(system, foundations, dataStatus) {
     if ((status.reviewBundles.open?.count || 0) > 0 || (status.reviewBundles.partial?.count || 0) > 0) items.push({ severity: 'medium', scope: status.foundation.id, code: 'review_bundles_waiting', message: `${name} has review bundles awaiting approval.` });
     if ((status.offerBatches.pending_contacts || 0) > 0) items.push({ severity: 'medium', scope: status.foundation.id, code: 'recipient_contacts_pending', message: `${name} has approved offers waiting for recipient contact verification.` });
     if (status.compliance.acceptedPendingCompliance > 0) items.push({ severity: 'high', scope: status.foundation.id, code: 'compliance_waiting', message: `${name} has accepted grants waiting for compliance review.` });
-    if (status.compliance.approvedCompliancePendingFreshStatus > 0) items.push({ severity: 'high', scope: status.foundation.id, code: 'cra_status_waiting', message: `${name} has compliance-approved accepted grants without fresh registered-status evidence.` });
+    if (status.compliance.approvedCompliancePendingFreshStatus > 0) items.push({ severity: 'high', scope: status.foundation.id, code: 'cra_status_waiting', message: `${name} has compliance-approved accepted grants without fresh eligible-status evidence.` });
     if (status.reporting.paidPendingReporting > 0) items.push({ severity: 'medium', scope: status.foundation.id, code: 'reporting_waiting', message: `${name} has paid grants not yet marked reported.` });
     if (status.recentFailures.length) items.push({ severity: 'high', scope: status.foundation.id, code: 'workflow_failures', message: `${name} has recent allocation/offer failures requiring review.` });
   }
