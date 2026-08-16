@@ -33,20 +33,73 @@ let stopping = false;
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
+async function runWithLeaseRenewal(job, work) {
+  const renewEveryMs = Math.max(1000, Math.min(Math.floor(config.automationLeaseSeconds * 1000 / 3), 60_000));
+  let stopped = false;
+  let renewing = false;
+  let leaseLost = false;
+  let renewalError = null;
+
+  const renew = async () => {
+    if (stopped || renewing || leaseLost) return;
+    renewing = true;
+    try {
+      const lease = await scheduler.renewLease(job.name, workerId);
+      if (!lease) {
+        leaseLost = true;
+        return;
+      }
+      await scheduler.heartbeat(workerId, `running:${job.name}`, {
+        leaseRenewedAt: new Date().toISOString(),
+        leaseUntil: lease.locked_until?.toISOString?.() || lease.locked_until
+      });
+    } catch (error) {
+      renewalError = error;
+    } finally {
+      renewing = false;
+    }
+  };
+
+  const timer = setInterval(() => { void renew(); }, renewEveryMs);
+  timer.unref?.();
+  try {
+    const result = await work();
+    if (renewing) {
+      while (renewing) await sleep(10);
+    }
+    if (leaseLost) throw new Error(`Automation lease for ${job.name} was lost while work was running.`);
+    if (renewalError) {
+      const finalRenewal = await scheduler.renewLease(job.name, workerId);
+      if (!finalRenewal) throw new Error(`Automation lease for ${job.name} could not be renewed after a renewal error: ${renewalError.message}`);
+    }
+    return result;
+  } finally {
+    stopped = true;
+    clearInterval(timer);
+  }
+}
+
 async function cycle() {
   await scheduler.heartbeat(workerId, 'claiming', { pid: process.pid });
   const jobs = await scheduler.claimDueJobs(workerId, 4);
   const results = [];
   for (const job of jobs) {
     try {
-      await scheduler.heartbeat(workerId, `running:${job.name}`);
-      const result = await runAutomationJob(job.name, { config, repository, provider, pool, dataDir, year });
+      await scheduler.heartbeat(workerId, `running:${job.name}`, {
+        leaseUntil: job.locked_until?.toISOString?.() || job.locked_until
+      });
+      const result = await runWithLeaseRenewal(job, () => runAutomationJob(job.name, { config, repository, provider, pool, dataDir, year }));
       const status = result?.skipped ? 'skipped' : 'success';
       await scheduler.complete(job.name, workerId, result || {}, status);
       results.push({ name: job.name, status, result });
     } catch (error) {
-      await scheduler.fail(job.name, workerId, error);
-      results.push({ name: job.name, status: 'failed', error: error.message });
+      const recorded = await scheduler.fail(job.name, workerId, error).catch(() => null);
+      results.push({
+        name: job.name,
+        status: 'failed',
+        error: error.message,
+        leaseFailureRecorded: Boolean(recorded)
+      });
     }
   }
   await scheduler.heartbeat(workerId, 'idle', { jobsProcessed: jobs.length });
@@ -64,7 +117,7 @@ async function main() {
   while (!stopping) {
     const results = await cycle();
     if (results.some(result => result.status === 'failed')) console.error(JSON.stringify({ workerId, results }));
-    await sleep(config.automationPollSeconds * 1000);
+    if (!stopping) await sleep(config.automationPollSeconds * 1000);
   }
 }
 
