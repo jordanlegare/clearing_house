@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { createDatabasePool } from '../src/db/pool.mjs';
 import { WorkflowRepository } from '../src/db/workflow_repository.mjs';
 import { WorkflowService } from '../src/workflow/workflow_service.mjs';
+import { createManualPaymentIntent, recordBankingVerification } from '../src/workflow/runtime_extensions.mjs';
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) throw new Error('DATABASE_URL is required for workflow DB smoke.');
@@ -28,7 +29,8 @@ try {
   const analyst = await actor('analyst', foundation.id, 'foundation_analyst');
   const approver = await actor('approver', foundation.id, 'foundation_approver');
   const compliance = await actor('compliance', foundation.id, 'compliance_reviewer');
-  const pay = await actor('payment', foundation.id, 'payment_operator');
+  const payCreator = await actor('payment-creator', foundation.id, 'payment_operator');
+  const payAuthorizer = await actor('payment-authorizer', foundation.id, 'payment_operator');
   const recipientAdmin = await actor('recipient', recipient.id, 'recipient_admin');
 
   let grant = await service.createGrant(analyst, {
@@ -53,9 +55,37 @@ try {
   await service.reviewCompliance(compliance, {
     grantId: grant.id, decision: 'approved', rationale: 'Qualified donee status recorded and grant purpose reviewed.', idempotencyKey: 'db-smoke-compliance'
   });
-  grant = await service.authorizeManualPayment(pay, { grantId: grant.id, idempotencyKey: 'db-smoke-auth-payment' });
+
+  const banking = await recordBankingVerification(service, payCreator, {
+    grantId: grant.id,
+    status: 'verified',
+    externalReference: 'CI-BANKING-VERIFICATION-001',
+    evidence: { provider: 'ci-fixture', scope: 'recipient-payout-destination' },
+    expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+    idempotencyKey: 'db-smoke-banking'
+  });
+  assert.equal(banking.external_reference_encrypted, '[encrypted]');
+
+  const intent = await createManualPaymentIntent(service, payCreator, {
+    grantId: grant.id,
+    idempotencyKey: 'db-smoke-payment-intent'
+  });
+  assert.equal(intent.status, 'created');
+  assert.equal(intent.created_by, payCreator.id);
+
+  await assert.rejects(
+    () => service.authorizeManualPayment(payCreator, { grantId: grant.id, idempotencyKey: 'db-smoke-self-auth' }),
+    /creator cannot authorize|different operator/i
+  );
+
+  grant = await service.authorizeManualPayment(payAuthorizer, { grantId: grant.id, idempotencyKey: 'db-smoke-auth-payment' });
   assert.equal(grant.state, 'payment_authorized');
-  grant = await service.recordManualPayment(pay, { grantId: grant.id, externalPaymentReference: 'CI-BANK-REF-001', idempotencyKey: 'db-smoke-paid' });
+  const paymentIntent = (await pool.query('SELECT created_by, authorized_by, status FROM payment_intents WHERE grant_id=$1', [grant.id])).rows[0];
+  assert.equal(paymentIntent.created_by, payCreator.id);
+  assert.equal(paymentIntent.authorized_by, payAuthorizer.id);
+  assert.notEqual(paymentIntent.created_by, paymentIntent.authorized_by);
+
+  grant = await service.recordManualPayment(payAuthorizer, { grantId: grant.id, externalPaymentReference: 'CI-BANK-REF-001', idempotencyKey: 'db-smoke-paid' });
   assert.equal(grant.state, 'paid');
 
   const now = new Date();
@@ -71,8 +101,11 @@ try {
   const rawNotification = (await pool.query('SELECT recipient, attempts, status FROM notification_outbox WHERE grant_id=$1', [grant.id])).rows[0];
   assert.match(rawNotification.recipient, /^enc:v1:/);
   assert.equal(rawNotification.status, 'queued');
+  const rawBankingReference = (await pool.query('SELECT external_reference_encrypted FROM banking_verifications WHERE grant_id=$1', [grant.id])).rows[0].external_reference_encrypted;
+  assert.match(rawBankingReference, /^enc:v1:/);
+  assert.doesNotMatch(rawBankingReference, /CI-BANKING-VERIFICATION-001/);
   const auditCount = Number((await pool.query('SELECT count(*) AS n FROM audit_log')).rows[0].n);
-  assert.ok(auditCount >= 10);
+  assert.ok(auditCount >= 12);
 
   console.log(JSON.stringify({ ok: true, grantId: grant.id, state: grant.state, reportingRecordId: reporting.id, auditCount }, null, 2));
 } finally {

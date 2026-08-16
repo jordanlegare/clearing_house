@@ -1,6 +1,15 @@
 import { z } from 'zod';
+import {
+  approveNqdDiligence,
+  createManualPaymentIntent,
+  getCraPublicEvidence,
+  getNqdDiligence,
+  prepareNqdDiligence,
+  recordBankingVerification
+} from '../workflow/runtime_extensions.mjs';
 
 const readOnly = { readOnlyHint: true, openWorldHint: false, destructiveHint: false };
+const openRead = { readOnlyHint: true, openWorldHint: true, destructiveHint: false };
 const write = { readOnlyHint: false, openWorldHint: false, destructiveHint: false };
 const consequential = { readOnlyHint: false, openWorldHint: false, destructiveHint: true };
 
@@ -118,6 +127,12 @@ export function registerWorkflowTools(server, { service, actor }) {
     inputSchema: { grantId: uuid, reason: z.string().max(5_000).default(''), idempotencyKey }, annotations: consequential
   }, async args => result('Recipient declined the grant.', { grant: await service.declineGrant(actor, args) }));
 
+  server.registerTool('check_cra_public_evidence', {
+    title: 'Check CRA public revocation evidence',
+    description: 'Check CRA’s published revocations page for the supplied charity BN and return evidence only. Absence from the page is not proof of current eligibility and cannot satisfy the payment release gate.',
+    inputSchema: { businessNumber: z.string().min(9).max(20) }, annotations: openRead
+  }, async args => result('Checked CRA public revocation evidence. This is not an eligibility determination.', { evidence: await getCraPublicEvidence(service, args) }));
+
   server.registerTool('record_cra_status_verification', {
     title: 'Record CRA charity-status verification',
     description: 'Compliance action to record a human-observed current status from CRA’s List of Charities. Annual T3010 data alone is not accepted as release-time status verification.',
@@ -130,9 +145,41 @@ export function registerWorkflowTools(server, { service, actor }) {
     }, annotations: consequential
   }, async args => result('Recorded authoritative CRA status observation for the grant recipient.', { statusCheck: await service.recordCraStatusVerification(actor, args) }));
 
+  server.registerTool('prepare_nqd_diligence', {
+    title: 'Prepare non-qualified-donee diligence',
+    description: 'Prepare a proportional diligence assessment for a non-qualified-donee grant. A different compliance reviewer must approve the assessment before grant compliance can be approved.',
+    inputSchema: {
+      grantId: uuid,
+      charitablePurposeAlignment: z.string().min(5).max(20_000),
+      activityDescription: z.string().min(5).max(20_000),
+      activityLocation: z.string().max(2_000).default(''),
+      durationMonths: z.number().int().min(1).max(120).default(12),
+      relationshipExperience: z.enum(['none','some','extensive']).default('none'),
+      researchSummary: z.string().max(20_000).default(''),
+      writtenAgreement: z.boolean().default(true),
+      reportingPlan: z.string().min(3).max(5_000).default('final_report'),
+      periodicTransfers: z.boolean().default(false),
+      separateLedger: z.boolean().default(true),
+      notes: z.string().max(20_000).default(''),
+      idempotencyKey
+    }, annotations: consequential
+  }, async args => result('Prepared proportional non-qualified-donee diligence. Separate compliance approval is still required.', { diligence: await prepareNqdDiligence(service, actor, args) }));
+
+  server.registerTool('get_nqd_diligence', {
+    title: 'Get non-qualified-donee diligence',
+    description: 'Read the diligence record for an accessible grant.',
+    inputSchema: { grantId: uuid }, annotations: readOnly
+  }, async args => result('Returned non-qualified-donee diligence.', { diligence: await getNqdDiligence(service, actor, args) }));
+
+  server.registerTool('approve_nqd_diligence', {
+    title: 'Approve non-qualified-donee diligence',
+    description: 'Compliance-reviewer action to approve a non-qualified-donee diligence record. The reviewer cannot be the actor who prepared the same record.',
+    inputSchema: { grantId: uuid, idempotencyKey }, annotations: consequential
+  }, async args => result('Approved non-qualified-donee diligence.', { diligence: await approveNqdDiligence(service, actor, args) }));
+
   server.registerTool('review_grant_compliance', {
     title: 'Review grant compliance',
-    description: 'Record an independent compliance decision and rationale before payment authorization.',
+    description: 'Record an independent compliance decision and rationale before payment authorization. Non-qualified-donee grants cannot be approved until separately approved diligence exists.',
     inputSchema: {
       grantId: uuid,
       decision: z.enum(['approved','blocked','needs_review']),
@@ -141,9 +188,28 @@ export function registerWorkflowTools(server, { service, actor }) {
     }, annotations: consequential
   }, async args => result('Recorded grant compliance review.', { review: await service.reviewCompliance(actor, args) }));
 
+  server.registerTool('record_banking_verification', {
+    title: 'Record external banking verification',
+    description: 'Record an external banking-verification status/reference for an accepted grant. The reference is encrypted; bank account/card coordinates must not be supplied.',
+    inputSchema: {
+      grantId: uuid,
+      status: z.enum(['verified','needs_review','failed','expired']),
+      externalReference: z.string().min(3).max(2_000),
+      evidence: boundedEvidence.default({}),
+      expiresAt: z.string().datetime().optional(),
+      idempotencyKey
+    }, annotations: consequential
+  }, async args => result('Recorded external banking-verification evidence. No bank credentials or transfer instructions were stored.', { bankingVerification: await recordBankingVerification(service, actor, args) }));
+
+  server.registerTool('create_manual_payment_intent', {
+    title: 'Create manual payment intent',
+    description: 'Payment-operator action to create the manual payment intent after external banking verification. A different payment operator must later authorize it; this tool cannot move money.',
+    inputSchema: { grantId: uuid, idempotencyKey }, annotations: consequential
+  }, async args => result('Created the manual payment intent for separate authorization. No bank transfer was executed.', { paymentIntent: await createManualPaymentIntent(service, actor, args) }));
+
   server.registerTool('authorize_manual_payment', {
     title: 'Authorize manual payment',
-    description: 'Authorize a manual/external payment record only after recipient acceptance, fresh authoritative CRA status verification and compliance approval. This tool cannot execute a bank transfer.',
+    description: 'Authorize a manual/external payment only after recipient acceptance, fresh authoritative CRA status verification, compliance approval, verified external banking evidence, and a payment intent created by a different operator. This tool cannot execute a bank transfer.',
     inputSchema: { grantId: uuid, idempotencyKey }, annotations: consequential
   }, async args => result('Manual payment was authorized for external execution. No bank transfer was executed by ChatGPT.', { grant: await service.authorizeManualPayment(actor, args) }));
 
