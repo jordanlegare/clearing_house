@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import readline from 'node:readline';
 import { createReadStream } from 'node:fs';
-import { extractCity, extractDesignation, extractName, extractProvince, numericFields, firstField, extractPhoneCandidates, extractEmailCandidates } from './normalize.mjs';
+import { extractCity, extractDesignation, extractName, extractProvince, numericFields, firstField, extractPhoneCandidates, extractEmailCandidates, extractT3010FinancialSignals } from './normalize.mjs';
 
 const STOP = new Set('the and for with from this that those these de la le les des du et pour une un dans sur of to a an in on by at is are be as or canada canadian foundation charity charitable society association incorporated inc corporation corp trust fund fonds fondation'.split(' '));
 
@@ -121,6 +121,7 @@ export class T3010Repository {
       datasetId: this.manifest?.datasetId ?? null,
       charities: this.identification.length,
       foundations: this.foundationByBn.size,
+      financialRecords: this.financialByBn.size,
       dqRecords: this.dqByBn.size,
       programRows: [...this.programsByBn.values()].reduce((n, rows) => n + rows.length, 0)
     };
@@ -133,6 +134,7 @@ export class T3010Repository {
     const financial = this.financialByBn.get(bn);
     const programs = this.programsByBn.get(bn) ?? [];
     const designation = extractDesignation(ident.fields);
+    const normalizedFinancial = financial ? extractT3010FinancialSignals(financial.fields) : { signals: {}, evidence: {} };
     return {
       id: `t3010:charity:${bn}`,
       bn,
@@ -149,7 +151,13 @@ export class T3010Repository {
         ...extractEmailCandidates(ident.fields, web?.fields)
       ],
       programDescriptions: programs.slice(0, 8).map(r => firstField(r.fields, [/description/, /program/, /activity/]) || r.name).filter(Boolean),
-      financialSignals: financial ? numericFields(financial.fields, /(revenue|expenditure|asset|liabil|gift|grant)/i) : {},
+      financialSignals: normalizedFinancial.signals,
+      financialSignalEvidence: normalizedFinancial.evidence,
+      financialSource: financial ? {
+        sourceResourceId: financial.sourceResourceId,
+        sourceUrl: financial.sourceUrl,
+        rowNumber: financial.rowNumber
+      } : null,
       sourceYear: this.manifest?.year ?? null
     };
   }

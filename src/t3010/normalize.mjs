@@ -128,6 +128,51 @@ export function numericFields(fields, keyPattern = /(dq|disbursement|property|as
   return out;
 }
 
+const T3010_FINANCIAL_LINES = Object.freeze({
+  totalAssets: '4200',
+  totalLiabilities: '4350',
+  receiptedDonations: '4500',
+  totalRevenue: '4700',
+  totalExpenditures: '4950',
+  charitableProgramExpenditures: '5000',
+  managementAdministrationExpenditures: '5010',
+  fundraisingExpenditures: '5020',
+  otherExpenditures: '5040',
+  grantsToNonQualifiedDonees: '5045',
+  giftsToQualifiedDonees: '5050',
+  totalExpendituresIncludingQualifyingDisbursements: '5100'
+});
+
+function numericValue(value) {
+  if (value === '' || value == null) return null;
+  const n = Number(String(value).replace(/[$,\s]/g, ''));
+  return Number.isFinite(n) ? n : null;
+}
+
+function findLineField(fields, line) {
+  if (Object.prototype.hasOwnProperty.call(fields, line)) return [line, fields[line]];
+  const direct = `line_${line}`;
+  if (Object.prototype.hasOwnProperty.call(fields, direct)) return [direct, fields[direct]];
+  const pattern = new RegExp(`(?:^|_)${line}(?:_|$)`);
+  for (const [key, value] of Object.entries(fields)) if (pattern.test(key)) return [key, value];
+  return null;
+}
+
+export function extractT3010FinancialSignals(fields = {}) {
+  const signals = {};
+  const evidence = {};
+  for (const [name, line] of Object.entries(T3010_FINANCIAL_LINES)) {
+    const match = findLineField(fields, line);
+    if (!match) continue;
+    const [sourceKey, raw] = match;
+    const value = numericValue(raw);
+    if (value == null) continue;
+    signals[name] = value;
+    evidence[name] = { line, sourceKey, value };
+  }
+  return { signals, evidence };
+}
+
 export function normalizeT3010Record({ kind, rowNumber, fields, resource }) {
   return {
     bn: extractBn(fields),
