@@ -7,7 +7,7 @@ import { upsertRecipientContactCandidate } from '../workflow/recipient_contacts.
 
 const CONTACT_HINT = /(contact|contact-us|contactez|nous-joindre|nousjoindre|coordonn|about|a-propos|apropos|reach-us|connect)/i;
 const PHONE_CONTEXT = /(phone|telephone|t[ée]l[ée]?phone|tel\.?|call|contact|appelez|mobile|cell)/i;
-const FAX_CONTEXT = /(fax|facsimile|t[ée]l[ée]cop)/i;
+const FAX_LABEL = /(?:fax|facsimile|t[ée]l[ée]cop(?:ieur)?)\s*[:.\-]?\s*$/i;
 const USER_AGENT = 'CanadianPhilanthropyClearingHouse/1.0 (+public-contact-discovery)';
 
 function stripWww(hostname) {
@@ -19,7 +19,7 @@ function sameSiteHost(a, b) {
 }
 
 function ipv4Parts(address) {
-  const parts = address.split('.').map(Number);
+  const parts = String(address).split('.').map(Number);
   return parts.length === 4 && parts.every(n => Number.isInteger(n) && n >= 0 && n <= 255) ? parts : null;
 }
 
@@ -33,21 +33,17 @@ export function isPublicAddress(address) {
     if (p[0] === 100 && p[1] >= 64 && p[1] <= 127) return false;
     if (p[0] === 169 && p[1] === 254) return false;
     if (p[0] === 172 && p[1] >= 16 && p[1] <= 31) return false;
-    if (p[0] === 192 && p[1] === 168) return false;
-    if (p[0] === 192 && p[1] === 0) return false;
+    if (p[0] === 192 && (p[1] === 0 || p[1] === 168)) return false;
     if (p[0] === 198 && (p[1] === 18 || p[1] === 19)) return false;
     if (p[0] >= 224) return false;
     return true;
   }
-  const value = address.toLowerCase();
+  const value = String(address).toLowerCase();
   if (value === '::' || value === '::1') return false;
-  if (value.startsWith('fc') || value.startsWith('fd')) return false;
-  if (/^fe[89ab]/.test(value)) return false;
-  if (value.startsWith('ff')) return false;
+  if (value.startsWith('fc') || value.startsWith('fd') || /^fe[89ab]/.test(value) || value.startsWith('ff')) return false;
   if (value.startsWith('2001:db8:')) return false;
   const mapped = value.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
-  if (mapped) return isPublicAddress(mapped[1]);
-  return true;
+  return mapped ? isPublicAddress(mapped[1]) : true;
 }
 
 export function normalizeWebsiteUrl(value) {
@@ -56,8 +52,7 @@ export function normalizeWebsiteUrl(value) {
   if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(text)) text = `https://${text}`;
   let url;
   try { url = new URL(text); } catch { return null; }
-  if (!['http:', 'https:'].includes(url.protocol)) return null;
-  if (url.username || url.password) return null;
+  if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) return null;
   if (url.port && !['80', '443'].includes(url.port)) return null;
   const host = url.hostname.toLowerCase().replace(/\.$/, '');
   if (!host || host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local') || host.endsWith('.internal')) return null;
@@ -98,18 +93,17 @@ export async function safeFetchText(input, {
         servername: url.hostname,
         headers: {
           'user-agent': userAgent,
-          'accept': 'text/html,text/plain,application/xhtml+xml;q=0.9,*/*;q=0.1',
+          accept: 'text/html,text/plain,application/xhtml+xml;q=0.9,*/*;q=0.1',
           'accept-encoding': 'identity',
-          'connection': 'close'
+          connection: 'close'
         }
       }, response => {
         const status = response.statusCode || 0;
-        const location = response.headers.location;
-        if (status >= 300 && status < 400 && location) {
+        if (status >= 300 && status < 400 && response.headers.location) {
           response.resume();
           if (redirectsLeft <= 0) return reject(new Error('Website redirect limit exceeded.'));
           let next;
-          try { next = new URL(location, url); } catch { return reject(new Error('Website returned an invalid redirect.')); }
+          try { next = new URL(response.headers.location, url); } catch { return reject(new Error('Website returned an invalid redirect.')); }
           const safe = normalizeWebsiteUrl(next.href);
           if (!safe || !sameSiteHost(url.hostname, safe.hostname)) return reject(new Error('Website redirected outside the declared site.'));
           requestUrl(safe, redirectsLeft - 1).then(resolve, reject);
@@ -130,18 +124,10 @@ export async function safeFetchText(input, {
         let size = 0;
         response.on('data', chunk => {
           size += chunk.length;
-          if (size > maxBytes) {
-            req.destroy(new Error('Website response exceeded byte limit.'));
-            return;
-          }
+          if (size > maxBytes) return req.destroy(new Error('Website response exceeded byte limit.'));
           chunks.push(chunk);
         });
-        response.on('end', () => resolve({
-          url: url.href,
-          status,
-          contentType,
-          body: Buffer.concat(chunks).toString('utf8')
-        }));
+        response.on('end', () => resolve({ url: url.href, status, contentType, body: Buffer.concat(chunks).toString('utf8') }));
       });
       req.setTimeout(timeoutMs, () => req.destroy(new Error('Website request timed out.')));
       req.on('error', reject);
@@ -180,9 +166,8 @@ export function robotsAllows(text, pathname, userAgent = USER_AGENT) {
   const agent = userAgent.toLowerCase();
   const named = groups.filter(group => group.agents.some(value => value !== '*' && agent.includes(value)));
   const selected = named.length ? named : groups.filter(group => group.agents.includes('*'));
-  const rules = selected.flatMap(group => group.rules).filter(rule => rule.path);
   let winner = null;
-  for (const rule of rules) {
+  for (const rule of selected.flatMap(group => group.rules).filter(rule => rule.path)) {
     if (!pathname.startsWith(rule.path)) continue;
     if (!winner || rule.path.length > winner.path.length || (rule.path.length === winner.path.length && rule.type === 'allow')) winner = rule;
   }
@@ -206,13 +191,6 @@ function addCandidate(out, seen, phone, sourceUrl, extraction) {
   out.push({ channel: 'voice', destination: normalized, sourceUrl, extraction });
 }
 
-function isFaxLabel(before, after) {
-  const prefix = String(before || '').slice(-32);
-  const suffix = String(after || '').slice(0, 24);
-  return /(?:fax|facsimile|t[ée]l[ée]cop(?:ieur)?)\s*[:.\-]?\s*$/i.test(prefix)
-    || /^\s*(?:\(|\[|[-,:])?\s*(?:fax|facsimile|t[ée]l[ée]cop(?:ieur)?)\b/i.test(suffix);
-}
-
 export function extractWebsitePhoneCandidates(html, sourceUrl) {
   const out = [];
   const seen = new Set();
@@ -227,7 +205,7 @@ export function extractWebsitePhoneCandidates(html, sourceUrl) {
     const index = match.index || 0;
     const before = text.slice(Math.max(0, index - 48), index);
     const after = text.slice(index + match[0].length, Math.min(text.length, index + match[0].length + 48));
-    if (isFaxLabel(before, after)) continue;
+    if (FAX_LABEL.test(before.slice(-32))) continue;
     if (!contactPage && !PHONE_CONTEXT.test(`${before} ${after}`)) continue;
     addCandidate(out, seen, match[0], sourceUrl, 'page_text');
   }
@@ -245,25 +223,16 @@ export function extractContactPageLinks(html, baseUrl, limit = 3) {
     try { url = new URL(href, base); } catch { continue; }
     if (!['http:', 'https:'].includes(url.protocol) || !sameSiteHost(base.hostname, url.hostname)) continue;
     url.hash = '';
-    const key = url.href;
-    if (seen.has(key)) continue;
-    const text = stripMarkup(match[2]);
-    const signal = `${url.pathname} ${text}`;
+    if (seen.has(url.href)) continue;
+    const signal = `${url.pathname} ${stripMarkup(match[2])}`;
     if (!CONTACT_HINT.test(signal)) continue;
-    seen.add(key);
-    const score = /(contact|nous-joindre|contactez|coordonn|reach-us)/i.test(signal) ? 2 : 1;
-    scored.push({ url, score });
+    seen.add(url.href);
+    scored.push({ url, score: /(contact|nous-joindre|contactez|coordonn|reach-us)/i.test(signal) ? 2 : 1 });
   }
   return scored.sort((a, b) => b.score - a.score || a.url.href.localeCompare(b.url.href)).slice(0, Math.max(0, limit)).map(item => item.url);
 }
 
-export async function discoverWebsiteContacts({
-  website,
-  fetchText = safeFetchText,
-  timeoutMs = 5000,
-  maxBytes = 524288,
-  maxPages = 4
-}) {
+export async function discoverWebsiteContacts({ website, fetchText = safeFetchText, timeoutMs = 5000, maxBytes = 524288, maxPages = 4 }) {
   const root = normalizeWebsiteUrl(website);
   if (!root) return { status: 'blocked', reason: 'invalid_or_unsafe_website', pagesVisited: 0, candidates: [] };
   const options = { timeoutMs, maxBytes };
@@ -285,14 +254,13 @@ export async function discoverWebsiteContacts({
   if (home.status < 200 || home.status >= 300) return { status: 'failed', reason: `website_http_${home.status}`, pagesVisited: 0, candidates: [] };
   const homeUrl = new URL(home.url || root.href);
   const pages = [{ url: homeUrl, body: home.body }];
-  const links = extractContactPageLinks(home.body, homeUrl, Math.max(0, maxPages - 1));
-  for (const url of links) {
+  for (const url of extractContactPageLinks(home.body, homeUrl, Math.max(0, maxPages - 1))) {
     if (pages.length >= maxPages) break;
     if (robots && !robotsAllows(robots, url.pathname || '/')) continue;
     try {
       const result = await fetchText(url, options);
       if (result.status >= 200 && result.status < 300) pages.push({ url: new URL(result.url || url.href), body: result.body });
-    } catch { /* bounded enrichment is best-effort; keep already collected evidence */ }
+    } catch { /* best-effort enrichment keeps already collected public evidence */ }
   }
   const candidates = [];
   const seen = new Set();
@@ -355,12 +323,7 @@ export async function seedWebsiteRecipientContacts(repository, t3010Repository, 
         channel: candidate.channel,
         destination: candidate.destination,
         source: 'website_public',
-        sourceEvidence: {
-          website,
-          pageUrl: candidate.sourceUrl,
-          extraction: candidate.extraction,
-          discoveredAt: new Date().toISOString()
-        }
+        sourceEvidence: { website, pageUrl: candidate.sourceUrl, extraction: candidate.extraction, discoveredAt: new Date().toISOString() }
       });
       if (stored.inserted) inserted += 1;
     }
