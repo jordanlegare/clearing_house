@@ -1,57 +1,62 @@
 import { z } from 'zod';
-import { ROLES } from '../security/rbac.mjs';
-import { prepareNqdDiligence, getNqdDiligence, approveNqdDiligence, recordBankingVerification, createManualPaymentIntent } from '../workflow/runtime_extensions.mjs';
 import { registerPortfolioTools } from './portfolio_tools.mjs';
-import { registerPolicyTools } from './policy_tools.mjs';
-import { registerDqTools } from './dq_tools.mjs';
-import { registerReviewBundleTools } from './review_tools.mjs';
-import { registerOfferBatchTools } from './offer_tools.mjs';
-import { registerOpsTools } from './ops_tools.mjs';
-import { registerStatusVerificationTools } from './status_tools.mjs';
-import { registerFiscalReportingTools } from './reporting_tools.mjs';
-import { getCraPublicEvidence } from '../status/cra-evidence.mjs';
+import {
+  approveNqdDiligence,
+  createManualPaymentIntent,
+  getCraPublicEvidence,
+  getNqdDiligence,
+  prepareNqdDiligence,
+  recordBankingVerification
+} from '../workflow/runtime_extensions.mjs';
 
 const readOnly = { readOnlyHint: true, openWorldHint: false, destructiveHint: false };
+const openRead = { readOnlyHint: true, openWorldHint: true, destructiveHint: false };
 const write = { readOnlyHint: false, openWorldHint: false, destructiveHint: false };
 const consequential = { readOnlyHint: false, openWorldHint: false, destructiveHint: true };
-const openRead = { readOnlyHint: true, openWorldHint: true, destructiveHint: false };
-const uuid = z.string().uuid();
-const idempotencyKey = z.string().min(8).max(200);
-const boundedEvidence = z.record(z.union([z.string().max(5_000), z.number(), z.boolean(), z.null()])).refine(value => Object.keys(value).length <= 50, 'evidence has too many fields');
 
 function result(message, data = {}) {
   return { structuredContent: data, content: [{ type: 'text', text: message }] };
 }
 
+const uuid = z.string().uuid();
+const idempotencyKey = z.string().min(8).max(200);
+const boundedEvidence = z.record(z.any()).refine(value => JSON.stringify(value).length <= 20_000, 'evidence exceeds 20KB');
+
 export function registerWorkflowTools(server, { service, actor }) {
   server.registerTool('workflow_whoami', {
-    title: 'Show clearing-house identity and roles',
-    description: 'Return the authenticated user, global roles, organization memberships and OAuth scopes used for workflow authorization.',
+    title: 'Show workflow identity',
+    description: 'Show the authenticated clearing-house user, global roles and organization-scoped memberships used for grant workflow authorization.',
     inputSchema: {}, annotations: readOnly
-  }, async () => result('Returned the current workflow identity.', { actor: service.whoami(actor) }));
+  }, async () => result('Returned authenticated workflow identity.', { actor: service.whoami(actor) }));
 
-  server.registerTool('list_grants', {
-    title: 'List accessible grant records',
-    description: 'List grant workflow records visible through the authenticated user’s organization memberships.',
+  server.registerTool('workflow_list_grants', {
+    title: 'List accessible grants',
+    description: 'List grants visible to the authenticated user through foundation or recipient organization memberships.',
     inputSchema: { limit: z.number().int().min(1).max(200).default(50) }, annotations: readOnly
-  }, async args => result('Returned accessible grant records.', { grants: await service.listGrants(actor, args) }));
+  }, async args => result('Returned accessible grants.', { grants: await service.listGrants(actor, args) }));
 
-  server.registerTool('get_grant', {
+  server.registerTool('workflow_get_grant', {
     title: 'Get grant workflow record',
-    description: 'Return one grant if the authenticated user has access through the foundation or recipient organization.',
+    description: 'Fetch an authenticated grant workflow record, including current terms, compliance decision and authoritative recipient-status evidence when available.',
     inputSchema: { grantId: uuid }, annotations: readOnly
-  }, async args => result('Returned grant workflow record.', { grant: await service.getGrant(actor, args.grantId) }));
+  }, async ({ grantId }) => result('Returned grant workflow record.', { grant: await service.getGrant(actor, grantId) }));
+
+  registerPortfolioTools(server, { service, actor });
 
   server.registerTool('claim_recipient_organization', {
-    title: 'Claim registered charity organization',
-    description: 'Create a pending claim to administer a registered charity found in the loaded T3010 dataset. The claim grants no access until independently verified by a system administrator.',
-    inputSchema: { businessNumber: z.string().min(9).max(20), evidence: boundedEvidence.default({}), idempotencyKey }, annotations: consequential
-  }, async args => result('Created or returned the pending organization claim. No organization access was granted yet.', { claim: await service.claimRecipientOrganization(actor, args) }));
+    title: 'Claim a registered charity profile',
+    description: 'Create a pending claim linking the authenticated user to a registered-charity organization found in the loaded CRA T3010 dataset. Verification is still required before recipient-admin access is granted.',
+    inputSchema: {
+      businessNumber: z.string().min(9).max(20),
+      evidence: boundedEvidence.default({}),
+      idempotencyKey
+    }, annotations: write
+  }, async args => result('Created or returned the pending recipient-organization claim. No access was granted yet.', { claim: await service.claimRecipientOrganization(actor, args) }));
 
   server.registerTool('claim_foundation_organization', {
-    title: 'Claim foundation organization',
-    description: 'Create a pending claim to administer a foundation found in the loaded T3010 dataset. The claim grants no access until independently verified by a system administrator.',
-    inputSchema: { businessNumber: z.string().min(9).max(20), evidence: boundedEvidence.default({}), idempotencyKey }, annotations: consequential
+    title: 'Claim a foundation profile',
+    description: 'Create a pending claim linking the authenticated user to a public/private foundation found in the loaded CRA T3010 data. A verified claim grants foundation_analyst only; approval/payment roles require a separate admin grant.',
+    inputSchema: { businessNumber: z.string().min(9).max(20), evidence: boundedEvidence.default({}), idempotencyKey }, annotations: write
   }, async args => result('Created or returned the pending foundation claim. No foundation access was granted yet.', { claim: await service.claimFoundationOrganization(actor, args) }));
 
   server.registerTool('verify_organization_claim', {
@@ -102,7 +107,7 @@ export function registerWorkflowTools(server, { service, actor }) {
 
   server.registerTool('offer_grant', {
     title: 'Offer approved grant',
-    description: 'Offer an approved grant under a specific terms version. Optional email/SMS/voice notification is queued through the configured provider; this action does not transfer funds.',
+    description: 'Offer an approved grant under a specific terms version. This records the offer but does not itself transfer funds.',
     inputSchema: {
       grantId: uuid,
       termsVersion: z.string().min(1).max(100),
@@ -239,13 +244,4 @@ export function registerWorkflowTools(server, { service, actor }) {
     description: 'Record an external CRA submission reference and mark the paid grant reported. This records that the operator submitted the reporting package; it does not claim CRA accepted or validated the return.',
     inputSchema: { grantId: uuid, reportingRecordId: uuid, submissionReference: z.string().min(3).max(500), idempotencyKey }, annotations: consequential
   }, async args => result('Marked grant reported in the clearing-house workflow.', { grant: await service.markGrantReported(actor, args) }));
-
-  registerPortfolioTools(server, { service, actor });
-  registerPolicyTools(server, { service, actor });
-  registerDqTools(server, { service, actor });
-  registerReviewBundleTools(server, { service, actor });
-  registerOfferBatchTools(server, { service, actor });
-  registerOpsTools(server, { service, actor });
-  registerStatusVerificationTools(server, { service, actor });
-  registerFiscalReportingTools(server, { repository: service.repository, actor });
 }
