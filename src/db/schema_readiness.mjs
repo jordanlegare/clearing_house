@@ -13,7 +13,10 @@ export const REQUIRED_SCHEMA_OBJECTS = Object.freeze([
   'grant_review_bundles',
   'grant_offer_batches',
   'recipient_contacts',
-  'recipient_contact_discovery'
+  'recipient_contact_discovery',
+  'grant_reporting_metadata',
+  'grant_reporting_metadata_commands',
+  'fiscal_reporting_packages'
 ]);
 
 export async function checkDatabaseSchema(pool) {
