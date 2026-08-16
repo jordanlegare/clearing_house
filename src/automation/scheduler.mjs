@@ -22,6 +22,12 @@ export function jobDefinitions(config) {
       metadata: { purpose: 'Advance approved review bundles through verified recipient contact discovery and grant offering without bypassing recipient consent.' }
     },
     {
+      name: 'status_evidence',
+      enabled: enabled && config.enableWorkflowWrites,
+      intervalSeconds: 3600,
+      metadata: { purpose: 'Pre-collect CRA public evidence for compliance-approved accepted grants that need fresh authoritative status confirmation.' }
+    },
+    {
       name: 'notifications',
       enabled: enabled && config.notificationProvider !== 'disabled',
       intervalSeconds: config.notificationPollSeconds,
