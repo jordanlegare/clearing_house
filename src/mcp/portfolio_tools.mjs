@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { buildFoundationPortfolio, materializePortfolioDrafts } from '../workflow/portfolio_workflow.mjs';
 import { registerAllocationPolicyTools } from './policy_tools.mjs';
+import { registerDqEnvelopeTools } from './dq_tools.mjs';
 
 const readOnly = { readOnlyHint: true, openWorldHint: false, destructiveHint: false };
 const consequential = { readOnlyHint: false, openWorldHint: false, destructiveHint: true };
@@ -50,4 +51,5 @@ export function registerPortfolioTools(server, { service, actor }) {
   }));
 
   registerAllocationPolicyTools(server, { repository: service.repository, actor });
+  registerDqEnvelopeTools(server, { service, actor });
 }
