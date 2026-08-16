@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import { decryptText } from '../security/crypto.mjs';
+import { verifyAuditChain } from '../security/audit_verify.mjs';
 import { ingestT3010 } from '../t3010/importer.mjs';
 import { RESOURCE_KINDS } from '../t3010/constants.mjs';
 import { ensureOfferAccess } from '../workflow/offer_access.mjs';
@@ -71,6 +72,17 @@ export async function syncT3010Job({ config, dataDir, year }) {
   return { year: manifest.year, datasetId: manifest.datasetId, resources: manifest.resources?.length || 0, completedAt: new Date().toISOString() };
 }
 
+export async function auditIntegrityJob({ config, pool }) {
+  if (!config.auditHmacKey) return { skipped: true, reason: 'audit_hmac_key_not_configured' };
+  const result = await verifyAuditChain(pool, config.auditHmacKey);
+  if (!result.valid) {
+    const error = new Error(`Audit-chain verification failed at sequence ${result.failureSequence}: ${result.reason}`);
+    error.auditIntegrity = result;
+    throw error;
+  }
+  return result;
+}
+
 export async function maintenanceJob({ pool }) {
   const [notifications, tokens, workers] = await Promise.all([
     pool.query(`UPDATE notification_outbox SET locked_at=NULL, lock_token=NULL WHERE status='queued' AND locked_at < now() - interval '15 minutes' RETURNING id`),
@@ -86,6 +98,7 @@ export async function runAutomationJob(name, context) {
   if (name === 'offer_batches') return runOfferBatchesJob(context);
   if (name === 'notifications') return dispatchNotificationsJob(context);
   if (name === 't3010_sync') return syncT3010Job(context);
+  if (name === 'audit_integrity') return auditIntegrityJob(context);
   if (name === 'maintenance') return maintenanceJob(context);
   throw new Error(`Unknown automation job: ${name}`);
 }

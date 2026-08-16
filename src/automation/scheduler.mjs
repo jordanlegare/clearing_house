@@ -34,6 +34,12 @@ export function jobDefinitions(config) {
       metadata: { purpose: 'Refresh CRA T3010/Open Government source data.' }
     },
     {
+      name: 'audit_integrity',
+      enabled: enabled && Boolean(config.auditHmacKey),
+      intervalSeconds: 86_400,
+      metadata: { purpose: 'Verify the full HMAC-linked audit chain and fail loudly if stored audit evidence was altered or removed.' }
+    },
+    {
       name: 'maintenance',
       enabled,
       intervalSeconds: 300,
