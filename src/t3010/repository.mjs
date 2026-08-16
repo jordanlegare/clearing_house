@@ -51,6 +51,22 @@ function toMultiMap(rows) {
   return map;
 }
 
+function isFoundationDesignation(value) {
+  const designation = String(value ?? '').trim().toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '');
+  return /\b(?:public|private)\s+foundation\b/.test(designation)
+    || /\bfondation\s+(?:publique|privee)\b/.test(designation);
+}
+
+function buildFoundationMap(identification, foundationRows) {
+  const schedule1ByBn = toMap(foundationRows);
+  const map = new Map();
+  for (const ident of identification) {
+    if (!ident.bn || !isFoundationDesignation(extractDesignation(ident.fields))) continue;
+    map.set(ident.bn, schedule1ByBn.get(ident.bn) ?? { bn: ident.bn, name: ident.name, fields: {} });
+  }
+  return map;
+}
+
 export class T3010Repository {
   constructor(dataDir) {
     this.dataDir = path.resolve(dataDir);
@@ -82,7 +98,7 @@ export class T3010Repository {
     ]);
     this.identification = identification;
     this.identByBn = toMap(identification);
-    this.foundationByBn = toMap(foundations);
+    this.foundationByBn = buildFoundationMap(identification, foundations);
     this.dqByBn = toMap(dq);
     this.programsByBn = toMultiMap(programs);
     this.qualifiedDoneesByBn = toMultiMap(qualified);
@@ -122,7 +138,7 @@ export class T3010Repository {
       city: extractCity(ident.fields),
       category: firstField(ident.fields, [/category/, /charitable.*purpose/, /type.*code/]),
       fiscalPeriodEnd: firstField(ident.fields, [/fiscal.*period.*end/, /fpe/, /fiscal.*end/]),
-      isFoundation: this.foundationByBn.has(bn) || /foundation|fondation/i.test(designation),
+      isFoundation: this.foundationByBn.has(bn),
       website: web ? firstField(web.fields, [/website/, /web.*url/, /^url$/]) : '',
       publicContactCandidates: [
         ...extractPhoneCandidates(ident.fields, web?.fields),
