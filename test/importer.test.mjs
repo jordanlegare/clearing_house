@@ -27,17 +27,18 @@ test('ingestion normalizes resources and repository searches them', async () => 
   };
   const fetchImpl = async url => {
     if (String(url).includes('package_show')) return { ok: true, json: async () => meta };
-    if (String(url).endsWith('ident.csv')) return csvResponse('BN,Charity Name,Province,Designation\n111111111RR0001,Food Foundation,ON,Private foundation\n222222222RR0001,Community Food Centre,ON,Charitable organization\n');
-    if (String(url).includes('foundations')) return csvResponse('BN,Foundation assets\n111111111RR0001,10000000\n222222222RR0001,0\n');
-    if (String(url).includes('dq')) return csvResponse('BN,Disbursement Quota Amount\n111111111RR0001,500000\n');
+    if (String(url).endsWith('ident.csv')) return csvResponse('BN,Charity Name,Province,Designation\n111111111RR0001,Public Food Foundation,ON,A\n333333333RR0001,Private Food Foundation,ON,B\n222222222RR0001,Community Food Centre,ON,C\n');
+    if (String(url).includes('foundations')) return csvResponse('BN,Foundation assets\n111111111RR0001,10000000\n333333333RR0001,5000000\n222222222RR0001,0\n');
+    if (String(url).includes('dq')) return csvResponse('BN,Disbursement Quota Amount\n111111111RR0001,500000\n333333333RR0001,250000\n');
     if (String(url).endsWith('program.csv')) return csvResponse('BN,Program Description\n222222222RR0001,Emergency food and community meals\n');
     throw new Error(`unexpected ${url}`);
   };
   await ingestT3010({ year: 2024, outputDir: dir, resources: ['identification','foundations','disbursement_quota','programs'], fetchImpl });
   const repo = new T3010Repository(dir); await repo.load();
-  assert.equal(repo.status().charities, 2);
-  assert.equal(repo.status().foundations, 1);
+  assert.equal(repo.status().charities, 3);
+  assert.equal(repo.status().foundations, 2);
   assert.equal(repo.foundationProfile('111111111RR0001').disbursementQuotaNumeric.disbursement_quota_amount, 500000);
+  assert.equal(repo.foundationProfile('333333333RR0001').disbursementQuotaNumeric.disbursement_quota_amount, 250000);
   assert.equal(repo.foundationProfile('222222222RR0001'), null);
   const hits = repo.searchCharities({ query: 'food', province: 'ON' });
   assert.equal(hits[0].bn, '222222222RR0001');
