@@ -43,6 +43,9 @@ try {
   let analyst = await repository.upsertActorFromClaims({ subject: `bundle-analyst-${suffix}`, email: `analyst-${suffix}@example.ca`, displayName: 'Bundle Analyst' });
   let approver = await repository.upsertActorFromClaims({ subject: `bundle-approver-${suffix}`, email: `approver-${suffix}@example.ca`, displayName: 'Bundle Approver' });
   await pool.query(`INSERT INTO memberships (user_id,organization_id,role) VALUES ($1,$2,'foundation_analyst') ON CONFLICT DO NOTHING`, [analyst.id, foundation.id]);
+  // Give the analyst approval permission too so the self-approval assertion exercises
+  // the separation-of-duties rule itself rather than failing earlier on RBAC.
+  await pool.query(`INSERT INTO memberships (user_id,organization_id,role) VALUES ($1,$2,'foundation_approver') ON CONFLICT DO NOTHING`, [analyst.id, foundation.id]);
   await pool.query(`INSERT INTO memberships (user_id,organization_id,role) VALUES ($1,$2,'foundation_approver') ON CONFLICT DO NOTHING`, [approver.id, foundation.id]);
   analyst = await repository.upsertActorFromClaims({ subject: `bundle-analyst-${suffix}` });
   approver = await repository.upsertActorFromClaims({ subject: `bundle-approver-${suffix}` });
