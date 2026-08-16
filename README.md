@@ -1,6 +1,6 @@
 # Canadian Philanthropy Clearing House
 
-A **ChatGPT-compatible MCP plugin/app** for turning Canadian foundation disbursement capacity into discoverable, auditable matches with registered charities—without making frontline organizations repeatedly search and apply for the same capital.
+A **ChatGPT plugin-compatible MCP app/backend** for turning Canadian foundation disbursement capacity into discoverable, auditable matches with registered charities—without making frontline organizations repeatedly search and apply for the same capital.
 
 The project ingests public **CRA T3010 List of charities** data from Open Government Canada and exposes it to ChatGPT through a Streamable HTTP MCP server.
 
@@ -19,9 +19,18 @@ The project ingests public **CRA T3010 List of charities** data from Open Govern
 
 **No payment rail exists. No tool awards or transfers money.**
 
-## Current ChatGPT integration
+## ChatGPT Plugins / Apps compatibility
 
-OpenAI's current app/plugin path is MCP-based. Run this service on a remote HTTPS host, then configure the `/mcp` endpoint as a custom app/plugin in ChatGPT developer mode. The server also provides conventional `search` and `fetch` tools for read/fetch use cases.
+As of July 2026, OpenAI's Plugin Directory is the discovery/package layer. A plugin can include one or more apps, skills, and app templates; an **app** remains the integration that connects ChatGPT to external data and actions. This repository implements that underlying MCP app/backend.
+
+To use it in ChatGPT:
+
+1. deploy this service to a remotely reachable HTTPS host;
+2. create a custom app in ChatGPT developer mode using the deployed `/mcp` endpoint and scan its tools;
+3. test and publish the app for the intended workspace;
+4. create/import/submit or otherwise make available the containing plugin when Plugin Directory distribution is desired.
+
+A remote MCP app does not, by itself, create a Plugin Directory listing. The repository therefore does **not** invent an obsolete `ai-plugin.json` manifest or a proprietary plugin package format that OpenAI does not document for this flow.
 
 ## Quick start
 
