@@ -17,7 +17,13 @@ jobs:
       - run: npm install
       - name: Discover and stream sample CRA T3010 rows from Open Government Canada
         run: npm run smoke:t3010
+      - name: Verify live Schedule 8 line mapping against Open Canada schema
+        env:
+          DQ_LIVE_SMOKE_ROWS: 500
+        run: npm run smoke:dq-live
       - uses: actions/upload-artifact@v4
         with:
-          name: t3010-smoke-manifest
-          path: .tmp/t3010-smoke/manifest.json
+          name: t3010-smoke-manifests
+          path: |
+            .tmp/t3010-smoke/manifest.json
+            .tmp/dq-live-smoke/manifest.json
