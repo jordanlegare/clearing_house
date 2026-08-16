@@ -12,4 +12,22 @@ ALTER TABLE grants
 CREATE INDEX IF NOT EXISTS grants_foundation_planning_year_idx
   ON grants(foundation_org_id, planning_fiscal_year, state);
 
+CREATE OR REPLACE FUNCTION set_grant_planning_year_from_policy()
+RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  IF NEW.automation_policy_id IS NOT NULL
+     AND (TG_OP = 'INSERT' OR OLD.automation_policy_id IS DISTINCT FROM NEW.automation_policy_id OR NEW.planning_fiscal_year IS NULL) THEN
+    SELECT EXTRACT(YEAR FROM p.window_end)::integer INTO NEW.planning_fiscal_year
+    FROM foundation_allocation_policies p
+    WHERE p.id = NEW.automation_policy_id;
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS grants_policy_planning_year ON grants;
+CREATE TRIGGER grants_policy_planning_year
+BEFORE INSERT OR UPDATE OF automation_policy_id, planning_fiscal_year ON grants
+FOR EACH ROW EXECUTE FUNCTION set_grant_planning_year_from_policy();
+
 COMMIT;
