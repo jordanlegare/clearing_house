@@ -69,8 +69,8 @@ try {
   });
 
   const grant = (await pool.query(`INSERT INTO grants
-    (foundation_org_id,recipient_org_id,amount_cad,purpose,recipient_type,state,automation_policy_id,proposed_by,approved_by,proposed_at,approved_at,creation_idempotency_key)
-    VALUES ($1,$2,25000,'General operating support','qualified_donee','approved',$3,$4,$5,now(),now(),$6)
+    (foundation_org_id,recipient_org_id,amount_cad,purpose,recipient_type,state,automation_policy_id,proposed_by,approved_by,creation_idempotency_key)
+    VALUES ($1,$2,25000,'General operating support','qualified_donee','approved',$3,$4,$5,$6)
     RETURNING *`, [foundation.id, recipient.id, policy.id, analyst.id, approver.id, `contact-grant-${suffix}`])).rows[0];
   const bundleItems = [{ grantId: grant.id, recipientOrgId: recipient.id, amountCad: 25000 }];
   const bundleHash = reviewBundleHash({ foundationOrgId: foundation.id, policyId: policy.id, policyVersion: policy.version, items: bundleItems });
