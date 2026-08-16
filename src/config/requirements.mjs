@@ -27,10 +27,14 @@ export function loadRuntimeConfig(env = process.env) {
     auditHmacKey: env.AUDIT_HMAC_KEY || '',
     notificationProvider: env.NOTIFICATION_PROVIDER || 'disabled',
     paymentProvider: env.PAYMENT_PROVIDER || 'disabled',
+    twilioAccountSid: env.TWILIO_ACCOUNT_SID || '',
+    twilioAuthToken: env.TWILIO_AUTH_TOKEN || '',
+    twilioFromNumber: env.TWILIO_FROM_NUMBER || '',
     enableWorkflowWrites: bool(env.ENABLE_WORKFLOW_WRITES, false),
     enableT3010Sync: bool(env.ENABLE_T3010_SYNC, false),
     craStatusMaxAgeHours: positiveInt(env.CRA_STATUS_MAX_AGE_HOURS, 24),
     retentionDays: positiveInt(env.RETENTION_DAYS, 2555),
+    notificationBatchSize: positiveInt(env.NOTIFICATION_BATCH_SIZE, 25),
     requireSeparationOfDuties: bool(env.REQUIRE_SEPARATION_OF_DUTIES, true)
   };
 }
@@ -44,19 +48,29 @@ export function assessReadiness(config) {
     if (!config.databaseUrl) blockers.push('DATABASE_URL is required in production.');
     if (config.enableWorkflowWrites && !config.oidcIssuer) blockers.push('OIDC_ISSUER is required when workflow writes are enabled.');
     if (config.enableWorkflowWrites && !config.oidcClientId) blockers.push('OIDC_CLIENT_ID is required when workflow writes are enabled.');
+    if (config.enableWorkflowWrites && !config.oidcAudience) blockers.push('OIDC_AUDIENCE is required when workflow writes are enabled.');
     if (config.enableWorkflowWrites && config.encryptionKey.length < 32) blockers.push('ENCRYPTION_KEY must be at least 32 characters when workflow writes are enabled.');
     if (config.enableWorkflowWrites && config.auditHmacKey.length < 32) blockers.push('AUDIT_HMAC_KEY must be at least 32 characters when workflow writes are enabled.');
     if (config.notificationProvider === 'console') blockers.push('Console notifications are not permitted in production.');
   }
 
-  if (!['disabled', 'console', 'twilio', 'email'].includes(config.notificationProvider)) {
+  if (!['disabled', 'console', 'twilio'].includes(config.notificationProvider)) {
     blockers.push(`Unsupported NOTIFICATION_PROVIDER: ${config.notificationProvider}`);
   }
   if (!['disabled', 'manual'].includes(config.paymentProvider)) {
     blockers.push(`Unsupported PAYMENT_PROVIDER: ${config.paymentProvider}`);
   }
+  if (config.notificationProvider === 'twilio') {
+    if (!config.twilioAccountSid) blockers.push('TWILIO_ACCOUNT_SID is required for Twilio notifications.');
+    if (!config.twilioAuthToken) blockers.push('TWILIO_AUTH_TOKEN is required for Twilio notifications.');
+    if (!config.twilioFromNumber) blockers.push('TWILIO_FROM_NUMBER is required for Twilio notifications.');
+    if (config.encryptionKey.length < 32) blockers.push('ENCRYPTION_KEY is required to encrypt notification recipients.');
+  }
   if (config.enableWorkflowWrites && config.paymentProvider === 'disabled') {
-    warnings.push('Workflow writes are enabled while payments are disabled; grants can progress only to acceptance/approval workflows.');
+    warnings.push('Workflow writes are enabled while payments are disabled; grants can progress only to acceptance/compliance workflows.');
+  }
+  if (config.enableWorkflowWrites && config.notificationProvider === 'disabled') {
+    warnings.push('Workflow writes are enabled while notifications are disabled; offers must be surfaced through another recipient channel.');
   }
   if (config.craStatusMaxAgeHours > 72) warnings.push('CRA status verification age exceeds 72 hours; consider a tighter release-time verification window.');
   if (config.retentionDays < 2190) warnings.push('Retention is under six years; verify CRA books-and-records requirements for each record class before production use.');
