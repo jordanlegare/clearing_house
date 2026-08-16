@@ -3,6 +3,8 @@ import crypto from 'node:crypto';
 import { createDatabasePool } from '../src/db/pool.mjs';
 import { WorkflowRepository } from '../src/db/workflow_repository.mjs';
 import { ensureOfferAccess, inspectOfferAccess, consumeOfferAccess, OfferAccessError } from '../src/workflow/offer_access.mjs';
+import { encryptText } from '../src/security/crypto.mjs';
+import { dispatchNotificationsJob } from '../src/automation/jobs.mjs';
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) throw new Error('DATABASE_URL is required.');
@@ -104,9 +106,47 @@ try {
   await pool.query("UPDATE grants SET terms_digest='replacement-digest' WHERE id=$1", [changed.grantId]);
   await assert.rejects(() => inspectOfferAccess(repository, changedAccess.token), OfferAccessError);
 
+  // Prove the autonomous notification path inserts the secure offer URL immediately
+  // before delivery instead of relying on a human or a prior browser session.
+  await pool.query("DELETE FROM notification_outbox WHERE status='queued'");
+  const notified = await makeOfferedGrant('notification');
+  const encryptedRecipient = encryptText('+15145550123', encryptionKey);
+  await pool.query(`
+    INSERT INTO notification_outbox
+      (grant_id, channel, recipient, template, payload, status, idempotency_key)
+    VALUES ($1,'sms',$2,'grant_offer',$3::jsonb,'queued',$4)
+  `, [notified.grantId, encryptedRecipient, JSON.stringify({ message: 'legacy sign-in message' }), `portal-smoke-notification-${notified.grantId}`]);
+  const deliveredMessages = [];
+  const notificationResult = await dispatchNotificationsJob({
+    config: {
+      notificationProvider: 'test',
+      notificationBatchSize: 10,
+      encryptionKey,
+      recipientPortalEnabled: true,
+      recipientPortalBaseUrl: 'https://offers.example.ca',
+      offerTokenTtlHours: 24
+    },
+    repository,
+    provider: { async send(message) { deliveredMessages.push(message); return { providerMessageId: 'test-message-1' }; } }
+  });
+  assert.equal(notificationResult.sent, 1);
+  assert.equal(notificationResult.secureOfferLinks, 1);
+  assert.equal(deliveredMessages.length, 1);
+  assert.match(deliveredMessages[0].body, /No grant application is required/);
+  assert.match(deliveredMessages[0].body, /https:\/\/offers\.example\.ca\/offer\/[A-Za-z0-9_-]{40,128}/);
+  assert.equal(deliveredMessages[0].body.includes('legacy sign-in message'), false);
+
   const audit = await pool.query("SELECT action FROM audit_log WHERE resource_id=$1 ORDER BY sequence", [accepted.grantId]);
   assert.ok(audit.rows.some(row => row.action === 'grant.accepted_by_offer_token'));
-  console.log(JSON.stringify({ ok: true, acceptedGrant: accepted.grantId, declinedGrant: declined.grantId, singleUse: true, encryptedSecret: true }, null, 2));
+  console.log(JSON.stringify({
+    ok: true,
+    acceptedGrant: accepted.grantId,
+    declinedGrant: declined.grantId,
+    notificationGrant: notified.grantId,
+    singleUse: true,
+    encryptedSecret: true,
+    autonomousOfferLinkDelivery: true
+  }, null, 2));
 } finally {
   await pool.end();
 }
