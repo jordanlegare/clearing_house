@@ -3,6 +3,7 @@ export const REQUIRED_SCHEMA_OBJECTS = Object.freeze([
   'grants',
   'audit_log',
   'recipient_status_checks',
+  'recipient_status_verification_tasks',
   'compliance_reviews',
   'payment_intents',
   'notification_outbox',
