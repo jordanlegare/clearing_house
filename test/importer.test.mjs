@@ -21,7 +21,8 @@ test('ingestion normalizes resources and repository searches them', async () => 
         { id: 'i', name: 'Identification', format: 'CSV', url: 'https://fixture/ident.csv' },
         { id: 'f', name: 'Private/Public Foundations', format: 'CSV', url: 'https://fixture/schedule_1_foundations.csv' },
         { id: 'd', name: 'Disbursement Quota', format: 'CSV', url: 'https://fixture/schedule_8_dq.csv' },
-        { id: 'p', name: 'Charitable Programs', format: 'CSV', url: 'https://fixture/program.csv' }
+        { id: 'p', name: 'Charitable Programs', format: 'CSV', url: 'https://fixture/program.csv' },
+        { id: 'fin', name: 'Financial Data', format: 'CSV', url: 'https://fixture/financial.csv' }
       ]
     }
   };
@@ -31,15 +32,24 @@ test('ingestion normalizes resources and repository searches them', async () => 
     if (String(url).includes('foundations')) return csvResponse('BN,Foundation assets\n111111111RR0001,10000000\n333333333RR0001,5000000\n222222222RR0001,0\n');
     if (String(url).includes('dq')) return csvResponse('BN,Disbursement Quota Amount\n111111111RR0001,500000\n333333333RR0001,250000\n');
     if (String(url).endsWith('program.csv')) return csvResponse('BN,Program Description\n222222222RR0001,Emergency food and community meals\n');
+    if (String(url).endsWith('financial.csv')) return csvResponse('BN,4200,4350,4500,4700,4950,5000,5010,5020,5040,5045,5050,5100\n111111111RR0001,10000000,500000,750000,1200000,1000000,600000,150000,100000,150000,25000,100000,1125000\n222222222RR0001,2500000,300000,1750000,2000000,1900000,1600000,150000,100000,50000,0,0,1900000\n');
     throw new Error(`unexpected ${url}`);
   };
-  await ingestT3010({ year: 2024, outputDir: dir, resources: ['identification','foundations','disbursement_quota','programs'], fetchImpl });
+  await ingestT3010({ year: 2024, outputDir: dir, resources: ['identification','foundations','disbursement_quota','programs','financial_data'], fetchImpl });
   const repo = new T3010Repository(dir); await repo.load();
   assert.equal(repo.status().charities, 3);
   assert.equal(repo.status().foundations, 2);
+  assert.equal(repo.status().financialRecords, 2);
   assert.equal(repo.foundationProfile('111111111RR0001').disbursementQuotaNumeric.disbursement_quota_amount, 500000);
   assert.equal(repo.foundationProfile('333333333RR0001').disbursementQuotaNumeric.disbursement_quota_amount, 250000);
   assert.equal(repo.foundationProfile('222222222RR0001'), null);
+  const charity = repo.charityProfile('222222222RR0001');
+  assert.equal(charity.financialSignals.totalAssets, 2500000);
+  assert.equal(charity.financialSignals.totalRevenue, 2000000);
+  assert.equal(charity.financialSignals.charitableProgramExpenditures, 1600000);
+  assert.deepEqual(charity.financialSignalEvidence.totalRevenue, { line: '4700', sourceKey: '4700', value: 2000000 });
+  assert.equal(charity.financialSource.sourceResourceId, 'fin');
   const hits = repo.searchCharities({ query: 'food', province: 'ON' });
   assert.equal(hits[0].bn, '222222222RR0001');
+  assert.equal(hits[0].financialSignals.totalRevenue, 2000000);
 });
