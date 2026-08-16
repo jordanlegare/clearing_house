@@ -34,11 +34,11 @@ try {
   `)).rows[0];
   const foundation = (await pool.query(`
     INSERT INTO organizations (business_number,legal_name,organization_type,province,public_profile)
-    VALUES ('888888888RR0001','Fiscal Package Foundation','foundation','ON','{}'::jsonb) RETURNING id
+    VALUES ('819283746RR0001','Fiscal Package Foundation','foundation','ON','{}'::jsonb) RETURNING id
   `)).rows[0];
   const qd = (await pool.query(`
     INSERT INTO organizations (business_number,legal_name,organization_type,province,public_profile)
-    VALUES ('999999999RR0001','Grouped Qualified Donee','registered_charity','ON',$1::jsonb) RETURNING id
+    VALUES ('918273645RR0001','Grouped Qualified Donee','registered_charity','ON',$1::jsonb) RETURNING id
   `, [JSON.stringify({ city: 'Ottawa', country: 'Canada' })])).rows[0];
   const smallNqd = (await pool.query(`
     INSERT INTO organizations (legal_name,organization_type,province,public_profile)
@@ -90,7 +90,7 @@ try {
   assert.equal(ready.t3010.line5050QualifiedDoneeGiftsCad, 2500);
   assert.equal(ready.t1236.totalOrganizations, 1);
   assert.equal(ready.t1236.rows[0].totalGiftsCad, '2500.00');
-  assert.equal(ready.t1236.rows[0].businessNumber, '999999999RR0001');
+  assert.equal(ready.t1236.rows[0].businessNumber, '918273645RR0001');
   assert.equal(ready.t1441.required, true);
   assert.equal(ready.t1441.totalGranteesOver5000, 1);
   assert.equal(ready.t1441.rows.length, 2, 'each individual grant to the >$5k aggregate grantee must be listed');
