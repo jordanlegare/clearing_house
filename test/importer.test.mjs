@@ -22,7 +22,7 @@ test('ingestion normalizes resources and repository searches them', async () => 
         { id: 'f', name: 'Private/Public Foundations', format: 'CSV', url: 'https://fixture/schedule_1_foundations.csv' },
         { id: 'd', name: 'Disbursement Quota', format: 'CSV', url: 'https://fixture/schedule_8_dq.csv' },
         { id: 'p', name: 'Charitable Programs', format: 'CSV', url: 'https://fixture/program.csv' },
-        { id: 'fin', name: 'Financial Data', format: 'CSV', url: 'https://fixture/financial.csv' }
+        { id: 'fin', name: 'Financial Data', format: 'CSV', url: 'https://fixture/financial_d_and_schedule_6.csv' }
       ]
     }
   };
@@ -32,7 +32,7 @@ test('ingestion normalizes resources and repository searches them', async () => 
     if (String(url).includes('foundations')) return csvResponse('BN,Foundation assets\n111111111RR0001,10000000\n333333333RR0001,5000000\n222222222RR0001,0\n');
     if (String(url).includes('dq')) return csvResponse('BN,Disbursement Quota Amount\n111111111RR0001,500000\n333333333RR0001,250000\n');
     if (String(url).endsWith('program.csv')) return csvResponse('BN,Program Description\n222222222RR0001,Emergency food and community meals\n');
-    if (String(url).endsWith('financial.csv')) return csvResponse('BN,4200,4350,4500,4700,4950,5000,5010,5020,5040,5045,5050,5100\n111111111RR0001,10000000,500000,750000,1200000,1000000,600000,150000,100000,150000,25000,100000,1125000\n222222222RR0001,2500000,300000,1750000,2000000,1900000,1600000,150000,100000,50000,0,0,1900000\n');
+    if (String(url).includes('financial_d_and_schedule_6')) return csvResponse('BN,4200,4350,4500,4700,4950,5000,5010,5020,5040,5045,5050,5100\n111111111RR0001,10000000,500000,750000,1200000,1000000,600000,150000,100000,150000,25000,100000,1125000\n222222222RR0001,2500000,300000,1750000,2000000,1900000,1600000,150000,100000,50000,0,0,1900000\n');
     throw new Error(`unexpected ${url}`);
   };
   await ingestT3010({ year: 2024, outputDir: dir, resources: ['identification','foundations','disbursement_quota','programs','financial_data'], fetchImpl });
