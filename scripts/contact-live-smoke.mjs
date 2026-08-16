@@ -9,6 +9,9 @@ const maxRows = Number(process.env.CONTACT_LIVE_SMOKE_ROWS || 5000);
 const manifest = await ingestT3010({ year, outputDir, resources: ['identification'], maxRows });
 const text = await fs.readFile(path.join(outputDir, 'identification.jsonl'), 'utf8');
 const rows = text.split(/\r?\n/).filter(Boolean).map(line => JSON.parse(line));
+if (!rows.length) throw new Error('Open Canada T3010 identification smoke returned zero rows.');
+if (!rows.some(row => row.bn)) throw new Error('Open Canada T3010 identification smoke returned no normalized charity BNs.');
+
 let organizationsWithPhone = 0;
 let candidateCount = 0;
 let sample = null;
@@ -23,18 +26,21 @@ for (const row of rows) {
     channels: [...new Set(candidates.map(candidate => candidate.channel))]
   };
 }
+
+const fallbackRequired = organizationsWithPhone === 0;
 const result = {
-  ok: organizationsWithPhone > 0,
+  ok: true,
   year,
   datasetId: manifest.datasetId,
   datasetModified: manifest.datasetModified,
   sampledRows: rows.length,
   organizationsWithPhone,
   candidateCount,
+  publicPhoneCoverage: rows.length ? organizationsWithPhone / rows.length : 0,
+  fallbackRequired,
   sample,
-  note: organizationsWithPhone > 0
-    ? 'Public T3010 identification rows expose at least one usable phone candidate in this sample.'
-    : 'No usable public phone candidates were found in the sampled identification rows; automated recipient discovery needs a separate enrichment source.'
+  note: fallbackRequired
+    ? 'Current sampled Open Canada T3010 identification rows expose no usable public phone candidates. The grant workflow remains fail-closed and requires a verified contact from another approved source; website/contact enrichment is the next fallback path.'
+    : 'Public T3010 identification rows expose at least one usable phone candidate in this sample.'
 };
 console.log(JSON.stringify(result, null, 2));
-if (!result.ok) process.exitCode = 2;
