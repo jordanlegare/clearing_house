@@ -28,9 +28,9 @@ async function grant({ foundationId, recipientId, recipientType, amountCad, purp
 }
 
 try {
-  const analyst = (await pool.query(`
+  const reporter = (await pool.query(`
     INSERT INTO users (oidc_subject,email,display_name)
-    VALUES ('fiscal-reporting-analyst','fiscal@example.test','Fiscal Reporting Analyst') RETURNING id
+    VALUES ('fiscal-reporting-reviewer','fiscal@example.test','Fiscal Reporting Reviewer') RETURNING id
   `)).rows[0];
   const foundation = (await pool.query(`
     INSERT INTO organizations (business_number,legal_name,organization_type,province,public_profile)
@@ -42,14 +42,14 @@ try {
   `, [JSON.stringify({ city: 'Ottawa', country: 'Canada' })])).rows[0];
   const smallNqd = (await pool.query(`
     INSERT INTO organizations (legal_name,organization_type,province,public_profile)
-    VALUES ('Small Canadian Grantee','nqd','ON',$1::jsonb) RETURNING id
+    VALUES ('Small Canadian Grantee','non_qualified_donee','ON',$1::jsonb) RETURNING id
   `, [JSON.stringify({ city: 'Toronto', country: 'Canada' })])).rows[0];
   const largeNqd = (await pool.query(`
     INSERT INTO organizations (legal_name,organization_type,public_profile)
-    VALUES ('Large International Grantee','nqd',$1::jsonb) RETURNING id
+    VALUES ('Large International Grantee','non_qualified_donee',$1::jsonb) RETURNING id
   `, [JSON.stringify({ country: 'United States' })])).rows[0];
-  await pool.query(`INSERT INTO memberships (user_id,organization_id,role) VALUES ($1,$2,'foundation_analyst')`, [analyst.id, foundation.id]);
-  const actor = { id: analyst.id, subject: 'fiscal-reporting-analyst', roles: [], memberships: [{ organizationId: foundation.id, role: 'foundation_analyst' }] };
+  await pool.query(`INSERT INTO memberships (user_id,organization_id,role) VALUES ($1,$2,'foundation_approver')`, [reporter.id, foundation.id]);
+  const actor = { id: reporter.id, subject: 'fiscal-reporting-reviewer', roles: [], memberships: [{ organizationId: foundation.id, role: 'foundation_approver' }] };
 
   const qd1 = await grant({ foundationId: foundation.id, recipientId: qd.id, recipientType: 'qualified_donee', amountCad: '1000.00', purpose: 'Community services', recordedAt: '2026-02-15T12:00:00Z', suffix: 'qd-1' });
   const qd2 = await grant({ foundationId: foundation.id, recipientId: qd.id, recipientType: 'qualified_donee', amountCad: '1500.00', purpose: 'Community services', recordedAt: '2026-06-20T12:00:00Z', suffix: 'qd-2' });
@@ -100,6 +100,7 @@ try {
   assert.equal(ready.ledger.nonQualifiedDoneeTotalCad, '10500.00');
   assert.equal(ready.ledger.totalQualifyingDisbursementsCad, '13000.00');
   assert.match(ready.t1236.uploadCsv, /Grouped Qualified Donee/);
+  assert.doesNotMatch(ready.t1236.uploadCsv.split('\n')[0], /Designated gift/i, 'T1236 upload CSV must mirror the official worksheet columns');
   assert.match(ready.t1441.uploadCsv, /Large International Grantee/);
   assert.match(ready.packageHash, /^[a-f0-9]{64}$/);
 
