@@ -18,24 +18,53 @@ async function twilioPost(config, resource, body) {
   return { providerMessageId: payload.sid || null, providerStatus: payload.status || null };
 }
 
+async function resendPost(config, { to, subject, body, idempotencyKey }) {
+  const headers = {
+    authorization: `Bearer ${config.resendApiKey}`,
+    'content-type': 'application/json',
+    'user-agent': 'CanadianPhilanthropyClearingHouse/1.0'
+  };
+  if (idempotencyKey) headers['idempotency-key'] = String(idempotencyKey).slice(0, 256);
+  const response = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      from: config.resendFromEmail,
+      to: [to],
+      subject: subject || 'Canadian Philanthropy Clearing House',
+      text: body
+    })
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(`Resend email failed with HTTP ${response.status}: ${payload.message || payload.name || 'unknown error'}`);
+  return { providerMessageId: payload.id || null, providerStatus: 'accepted' };
+}
+
 export function createNotificationProvider(config) {
-  if (config.notificationProvider === 'disabled') {
-    return { async send() { throw new Error('Notification provider is disabled.'); } };
-  }
-  if (config.notificationProvider === 'console') {
-    return { async send(message) { console.log('[notification]', { ...message, to: '[redacted]' }); return { providerMessageId: `console-${Date.now()}` }; } };
-  }
-  if (config.notificationProvider === 'twilio') {
-    return {
-      async send({ channel, to, body }) {
-        if (channel === 'sms') return twilioPost(config, 'Messages', { To: to, From: config.twilioFromNumber, Body: body });
-        if (channel === 'voice') {
-          const twiml = `<Response><Say>${xmlEscape(body)}</Say></Response>`;
-          return twilioPost(config, 'Calls', { To: to, From: config.twilioFromNumber, Twiml: twiml });
+  return {
+    async send({ channel, to, body, subject = null, idempotencyKey = null }) {
+      if (channel === 'email') {
+        if (config.emailProvider === 'disabled') throw new Error('Email notification provider is disabled.');
+        if (config.emailProvider === 'console') {
+          console.log('[notification]', { channel, to: '[redacted]', subject, body });
+          return { providerMessageId: `console-email-${Date.now()}` };
         }
-        throw new Error(`Twilio provider does not support channel ${channel}.`);
+        if (config.emailProvider === 'resend') return resendPost(config, { to, subject, body, idempotencyKey });
+        throw new Error(`Unsupported email provider: ${config.emailProvider}.`);
       }
-    };
-  }
-  throw new Error(`Unsupported notification provider: ${config.notificationProvider}`);
+
+      if (!['sms','voice'].includes(channel)) throw new Error(`Unsupported notification channel: ${channel}.`);
+      if (config.notificationProvider === 'disabled') throw new Error('Phone notification provider is disabled.');
+      if (config.notificationProvider === 'console') {
+        console.log('[notification]', { channel, to: '[redacted]', body });
+        return { providerMessageId: `console-${Date.now()}` };
+      }
+      if (config.notificationProvider === 'twilio') {
+        if (channel === 'sms') return twilioPost(config, 'Messages', { To: to, From: config.twilioFromNumber, Body: body });
+        const twiml = `<Response><Say>${xmlEscape(body)}</Say></Response>`;
+        return twilioPost(config, 'Calls', { To: to, From: config.twilioFromNumber, Twiml: twiml });
+      }
+      throw new Error(`Unsupported notification provider: ${config.notificationProvider}`);
+    }
+  };
 }
