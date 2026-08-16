@@ -1,8 +1,13 @@
+import crypto from 'node:crypto';
 import { buildPortfolioPlan, allocationPlanHash } from '../matching/portfolio.mjs';
 import { PERMISSIONS, requireOrgPermission } from '../security/rbac.mjs';
 
 function normalizeBn(value) {
   return String(value || '').toUpperCase().replace(/[\s-]/g, '');
+}
+
+function draftIdempotencyKey(portfolioKey, businessNumber) {
+  return crypto.createHash('sha256').update(`${portfolioKey}|${businessNumber}`).digest('hex');
 }
 
 export async function buildFoundationPortfolio(service, actor, {
@@ -90,7 +95,7 @@ export async function materializePortfolioDrafts(service, actor, {
       recipientOrgId: recipientOrg.id,
       amountCad: item.amountCad,
       purpose,
-      idempotencyKey: `${idempotencyKey}:${item.businessNumber}`.slice(0, 200)
+      idempotencyKey: draftIdempotencyKey(idempotencyKey, item.businessNumber)
     });
     drafts.push({ grant, recipient: { businessNumber: item.businessNumber, name: item.profile.name } });
   }
