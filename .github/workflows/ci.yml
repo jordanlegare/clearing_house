@@ -8,6 +8,19 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: clearing_house_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -16,6 +29,32 @@ jobs:
       - run: npm install
       - run: npm run check
       - run: npm test
+      - name: Development readiness
+        run: npm run readiness
+      - name: Production readiness fails closed without workflow identity/secrets
+        shell: bash
+        run: |
+          if NODE_ENV=production \
+            PUBLIC_BASE_URL=https://clearing.example.ca \
+            DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/clearing_house_test \
+            ENABLE_WORKFLOW_WRITES=1 \
+            npm run readiness; then
+            echo "readiness unexpectedly passed insecure write configuration"
+            exit 1
+          fi
+      - name: Production read-only readiness can pass with HTTPS and persistence
+        run: |
+          NODE_ENV=production \
+          PUBLIC_BASE_URL=https://clearing.example.ca \
+          DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/clearing_house_test \
+          ENABLE_WORKFLOW_WRITES=0 \
+          npm run readiness
+      - name: Apply PostgreSQL core migration
+        run: |
+          docker run --rm --network host \
+            -e PGPASSWORD=postgres \
+            -v "$PWD:/work" -w /work postgres:16 \
+            psql -h 127.0.0.1 -U postgres -d clearing_house_test -v ON_ERROR_STOP=1 -f db/migrations/001_core.sql
       - name: MCP protocol smoke
         shell: bash
         run: |
