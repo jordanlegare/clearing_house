@@ -1,17 +1,16 @@
 {
   "name": "canadian-philanthropy-clearing-house",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "private": true,
   "type": "module",
-  "description": "ChatGPT MCP app and recipient self-service clearing layer for CRA T3010-informed Canadian foundation-to-charity grant workflows.",
-  "engines": {
-    "node": ">=22"
-  },
+  "description": "ChatGPT MCP app and autonomous clearing layer for CRA T3010-informed Canadian foundation-to-charity grant workflows.",
+  "engines": { "node": ">=22" },
   "scripts": {
     "test": "node --test test/*.test.mjs",
     "test:db": "node scripts/workflow-db-smoke.mjs",
     "test:portal-db": "node scripts/recipient-portal-db-smoke.mjs",
-    "check": "node --check src/mcp/server.mjs && node --check src/mcp/workflow_tools.mjs && node --check src/mcp/portfolio_tools.mjs && node --check scripts/ingest-t3010.mjs && node --check scripts/check-readiness.mjs && node --check scripts/workflow-db-smoke.mjs && node --check scripts/recipient-portal-db-smoke.mjs && node --check scripts/recipient-portal.mjs && node --check scripts/dispatch-notifications.mjs && node --check scripts/autonomous-worker.mjs && node --check scripts/bootstrap-admin.mjs && node --check src/config/requirements.mjs && node --check src/security/rbac.mjs && node --check src/security/auth.mjs && node --check src/security/audit.mjs && node --check src/security/crypto.mjs && node --check src/db/pool.mjs && node --check src/db/workflow_repository.mjs && node --check src/workflow/grant_lifecycle.mjs && node --check src/workflow/workflow_service.mjs && node --check src/workflow/runtime_extensions.mjs && node --check src/workflow/portfolio_workflow.mjs && node --check src/workflow/offer_access.mjs && node --check src/matching/portfolio.mjs && node --check src/automation/scheduler.mjs && node --check src/automation/jobs.mjs && node --check src/status/cra-evidence.mjs && node --check src/compliance/reporting.mjs && node --check src/compliance/status_verifier.mjs && node --check src/integrations/notification.mjs && node --check src/integrations/payment.mjs",
+    "test:allocation-policy-db": "node scripts/allocation-policy-db-smoke.mjs",
+    "check": "node --check src/mcp/server.mjs && node --check src/mcp/workflow_tools.mjs && node --check src/mcp/portfolio_tools.mjs && node --check src/mcp/policy_tools.mjs && node --check scripts/ingest-t3010.mjs && node --check scripts/check-readiness.mjs && node --check scripts/workflow-db-smoke.mjs && node --check scripts/recipient-portal-db-smoke.mjs && node --check scripts/allocation-policy-db-smoke.mjs && node --check scripts/recipient-portal.mjs && node --check scripts/dispatch-notifications.mjs && node --check scripts/autonomous-worker.mjs && node --check scripts/bootstrap-admin.mjs && node --check src/config/requirements.mjs && node --check src/security/rbac.mjs && node --check src/security/auth.mjs && node --check src/security/audit.mjs && node --check src/security/crypto.mjs && node --check src/db/pool.mjs && node --check src/db/workflow_repository.mjs && node --check src/workflow/grant_lifecycle.mjs && node --check src/workflow/workflow_service.mjs && node --check src/workflow/runtime_extensions.mjs && node --check src/workflow/portfolio_workflow.mjs && node --check src/workflow/offer_access.mjs && node --check src/matching/portfolio.mjs && node --check src/automation/scheduler.mjs && node --check src/automation/jobs.mjs && node --check src/automation/allocation_policies.mjs && node --check src/status/cra-evidence.mjs && node --check src/compliance/reporting.mjs && node --check src/compliance/status_verifier.mjs && node --check src/integrations/notification.mjs && node --check src/integrations/payment.mjs",
     "readiness": "node scripts/check-readiness.mjs",
     "start": "node src/mcp/server.mjs",
     "portal": "node scripts/recipient-portal.mjs",
