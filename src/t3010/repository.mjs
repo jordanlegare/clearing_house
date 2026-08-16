@@ -53,6 +53,10 @@ function toMultiMap(rows) {
 
 function isFoundationDesignation(value) {
   const designation = String(value ?? '').trim().toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '');
+  if (designation === 'a' || designation === 'b') return true;
+  if (designation === 'c') return false;
+  if (/^[ab]\s*[-–—:]/.test(designation)) return true;
+  if (/^c\s*[-–—:]/.test(designation)) return false;
   return /\b(?:public|private)\s+foundation\b/.test(designation)
     || /\bfondation\s+(?:publique|privee)\b/.test(designation);
 }
