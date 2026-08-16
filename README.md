@@ -20,6 +20,8 @@ With `ENABLE_WORKFLOW_WRITES=1`, PostgreSQL + OIDC/OAuth + encryption/audit keys
 - organization-scoped RBAC;
 - recipient and foundation profile claims against loaded T3010 records;
 - controlled system-admin verification and role assignment;
+- transparent budget-to-recipient portfolio planning with min/max grant and recipient-count constraints;
+- hash-bound portfolio materialization into **draft grants only**;
 - grant draft/proposal/approval/offer/acceptance lifecycle;
 - versioned recipient consent;
 - current CRA List-of-Charities status observations for release gating;
@@ -30,6 +32,31 @@ With `ENABLE_WORKFLOW_WRITES=1`, PostgreSQL + OIDC/OAuth + encryption/audit keys
 - idempotent writes and HMAC-chained audit records.
 
 **The app still cannot execute a bank transfer.** Payment remains an externally executed/manual operation that the clearing house can authorize and record.
+
+## Allocation portfolio flow
+
+The clearing house can now reverse the conventional grant-search process:
+
+```text
+foundation budget + focus + constraints
+            |
+            v
+public T3010 foundation evidence + recipient matches
+            |
+            v
+build_allocation_portfolio   (read-only planning)
+            |
+            v
+explicit portfolio review / ChatGPT write confirmation
+            |
+            v
+create_portfolio_drafts      (drafts only)
+            |
+            v
+propose -> separate approval -> offer -> recipient acceptance
+```
+
+`build_allocation_portfolio` never forces the budget to zero. If candidate supply, grant caps, or `maxRecipients` make full allocation impossible, it reports the unallocated remainder. `create_portfolio_drafts` verifies a deterministic plan hash and revalidates every recipient BN against the loaded registered-charity T3010 dataset before creating idempotent drafts. A draft is not an award.
 
 ## ChatGPT compatibility
 
@@ -113,12 +140,13 @@ Public tools remain available in read-only mode:
 
 Authenticated workflow mode adds:
 
-`workflow_whoami`, `workflow_list_grants`, `workflow_get_grant`, `claim_recipient_organization`, `claim_foundation_organization`, `verify_organization_claim`, `grant_organization_role`, `create_grant`, `propose_grant`, `approve_grant`, `offer_grant`, `accept_grant`, `decline_grant`, `record_cra_status_verification`, `review_grant_compliance`, `authorize_manual_payment`, `record_manual_payment`, `prepare_reporting_record`, and `mark_grant_reported`.
+`workflow_whoami`, `workflow_list_grants`, `workflow_get_grant`, `build_allocation_portfolio`, `create_portfolio_drafts`, `claim_recipient_organization`, `claim_foundation_organization`, `verify_organization_claim`, `grant_organization_role`, `create_grant`, `propose_grant`, `approve_grant`, `offer_grant`, `accept_grant`, `decline_grant`, `record_cra_status_verification`, `review_grant_compliance`, `authorize_manual_payment`, `record_manual_payment`, `prepare_reporting_record`, and `mark_grant_reported`.
 
 ## Safety boundaries
 
 - T3010 data is public/self-reported filing data, not a live legal-status guarantee.
-- Matching is discovery, not an award or CRA determination.
+- Matching and portfolio planning are discovery/allocation support, not awards or CRA determinations.
+- Portfolio materialization creates drafts only; proposal and approval remain separate actions.
 - Retrieved text never determines authorization.
 - Foundation roles are organization scoped.
 - Proposer/approver separation is enforced server-side.
