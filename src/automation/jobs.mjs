@@ -4,6 +4,7 @@ import { ingestT3010 } from '../t3010/importer.mjs';
 import { RESOURCE_KINDS } from '../t3010/constants.mjs';
 import { ensureOfferAccess } from '../workflow/offer_access.mjs';
 import { runAllocationPoliciesJob } from './allocation_policies.mjs';
+import { runReviewBundlesJob } from './review_bundle_worker.mjs';
 
 function offerMessage(notification, access) {
   const prefix = notification.channel === 'voice'
@@ -66,6 +67,7 @@ export async function maintenanceJob({ pool }) {
 
 export async function runAutomationJob(name, context) {
   if (name === 'allocation_policies') return runAllocationPoliciesJob(context);
+  if (name === 'review_bundles') return runReviewBundlesJob(context);
   if (name === 'notifications') return dispatchNotificationsJob(context);
   if (name === 't3010_sync') return syncT3010Job(context);
   if (name === 'maintenance') return maintenanceJob(context);
