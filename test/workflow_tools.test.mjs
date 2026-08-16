@@ -9,6 +9,7 @@ test('authenticated workflow exposes explicit, permission-separable MCP actions'
   for (const name of [
     'workflow_whoami','operational_status','build_allocation_portfolio','create_portfolio_drafts',
     'list_status_verification_tasks','get_status_verification_task','confirm_status_verification_task',
+    'set_grant_reporting_metadata','preview_fiscal_reporting_package','prepare_fiscal_reporting_package','get_fiscal_reporting_package',
     'create_allocation_policy','list_allocation_policies','update_allocation_policy','set_allocation_policy_enabled','run_allocation_policy_now',
     'suggest_dq_allocation_envelope','create_dq_backed_allocation_policy','get_dq_policy_basis',
     'get_allocation_policy_execution_options','set_allocation_policy_execution_options',
@@ -25,6 +26,10 @@ test('authenticated workflow exposes explicit, permission-separable MCP actions'
   assert.equal(tools.get('list_status_verification_tasks').spec.annotations.readOnlyHint, true);
   assert.equal(tools.get('get_status_verification_task').spec.annotations.readOnlyHint, true);
   assert.equal(tools.get('confirm_status_verification_task').spec.annotations.destructiveHint, true);
+  assert.equal(tools.get('preview_fiscal_reporting_package').spec.annotations.readOnlyHint, true);
+  assert.equal(tools.get('get_fiscal_reporting_package').spec.annotations.readOnlyHint, true);
+  assert.equal(tools.get('set_grant_reporting_metadata').spec.annotations.destructiveHint, true);
+  assert.equal(tools.get('prepare_fiscal_reporting_package').spec.annotations.destructiveHint, true);
   assert.equal(tools.get('build_allocation_portfolio').spec.annotations.readOnlyHint, true);
   assert.equal(tools.get('list_allocation_policies').spec.annotations.readOnlyHint, true);
   assert.equal(tools.get('suggest_dq_allocation_envelope').spec.annotations.readOnlyHint, true);
