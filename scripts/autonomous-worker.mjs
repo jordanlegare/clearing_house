@@ -30,7 +30,8 @@ const pool = createDatabasePool(config.databaseUrl);
 await assertDatabaseSchema(pool);
 const scheduler = new AutomationScheduler(pool, { leaseSeconds: config.automationLeaseSeconds });
 const repository = new WorkflowRepository(pool, { auditHmacKey: config.auditHmacKey, encryptionKey: config.encryptionKey });
-const provider = config.notificationProvider === 'disabled' ? null : createNotificationProvider(config);
+const notificationsConfigured = config.notificationProvider !== 'disabled' || config.emailProvider !== 'disabled';
+const provider = notificationsConfigured ? createNotificationProvider(config) : null;
 let stopping = false;
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));

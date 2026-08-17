@@ -3,6 +3,7 @@ import { PERMISSIONS, ROLES, requireGlobalRole, requireOrgPermission, scopedActo
 import { classifyGrantReporting, RECIPIENT_TYPES } from '../compliance/reporting.mjs';
 import { CRA_LIST_URL, normalizeCraObservedStatus } from '../compliance/status_verifier.mjs';
 import { RecipientFundingWorkspace } from './recipient_funding_workspace.mjs';
+import { prepareTestNotification } from './test_notifications.mjs';
 
 function requireActor(actor) {
   if (!actor?.id) throw new Error('Authentication is required for workflow tools.');
@@ -80,6 +81,23 @@ export class WorkflowService {
   async verifyRecipientClaim(actor, args) {
     requireGlobalRole(actor, ROLES.SYSTEM_ADMIN);
     return this.repository.verifyRecipientClaim({ actor, ...args });
+  }
+
+  async queueTestNotification(actor, args) {
+    requireGlobalRole(actor, ROLES.SYSTEM_ADMIN);
+    if (args.channel === 'email' && (!this.config.emailProvider || this.config.emailProvider === 'disabled')) {
+      throw new Error('EMAIL_PROVIDER is disabled; email test notifications are unavailable.');
+    }
+    if (['sms', 'voice'].includes(args.channel) && (!this.config.notificationProvider || this.config.notificationProvider === 'disabled')) {
+      throw new Error('NOTIFICATION_PROVIDER is disabled; phone test notifications are unavailable.');
+    }
+    const notification = prepareTestNotification(args);
+    return this.repository.queueTestNotification({ actor, notification, idempotencyKey: args.idempotencyKey });
+  }
+
+  async getTestNotificationStatus(actor, notificationId) {
+    requireGlobalRole(actor, ROLES.SYSTEM_ADMIN);
+    return this.repository.getTestNotificationStatus({ actor, notificationId });
   }
 
   async createGrant(actor, { foundationOrgId, recipientOrgId, amountCad, purpose, idempotencyKey }) {

@@ -2,8 +2,7 @@ import { createDatabasePool } from '../src/db/pool.mjs';
 import { WorkflowRepository } from '../src/db/workflow_repository.mjs';
 import { loadRuntimeConfig, assessReadiness } from '../src/config/requirements.mjs';
 import { createNotificationProvider } from '../src/integrations/notification.mjs';
-import { decryptText } from '../src/security/crypto.mjs';
-import crypto from 'node:crypto';
+import { dispatchNotificationsJob } from '../src/automation/jobs.mjs';
 
 const config = loadRuntimeConfig();
 const readiness = assessReadiness(config);
@@ -12,31 +11,18 @@ if (!readiness.ready) {
   process.exit(2);
 }
 if (!config.databaseUrl) throw new Error('DATABASE_URL is required.');
-if (config.notificationProvider === 'disabled') throw new Error('NOTIFICATION_PROVIDER is disabled.');
+if (config.notificationProvider === 'disabled' && config.emailProvider === 'disabled') throw new Error('All notification providers are disabled.');
 
 const pool = createDatabasePool(config.databaseUrl);
 const repository = new WorkflowRepository(pool, { auditHmacKey: config.auditHmacKey, encryptionKey: config.encryptionKey });
 const provider = createNotificationProvider(config);
 
-let sent = 0;
-let failed = 0;
+let summary;
 try {
-  const lockToken = crypto.randomUUID();
-  const queued = await repository.claimQueuedNotifications(config.notificationBatchSize, lockToken);
-  for (const notification of queued) {
-    try {
-      const to = decryptText(notification.recipient, config.encryptionKey);
-      const body = notification.payload?.message || 'A funding offer is available for your organization.';
-      const delivered = await provider.send({ channel: notification.channel, to, body });
-      await repository.markNotificationSent(notification.id, delivered.providerMessageId, lockToken);
-      sent += 1;
-    } catch (error) {
-      await repository.markNotificationFailed(notification.id, error.message, lockToken, notification.attempts < 3);
-      failed += 1;
-    }
-  }
-  console.log(JSON.stringify({ processed: sent + failed, sent, failed }, null, 2));
+  const result = await dispatchNotificationsJob({ config, repository, provider });
+  summary = { processed: result.processed || 0, sent: result.sent || 0, failed: result.failed || 0 };
+  console.log(JSON.stringify(summary, null, 2));
 } finally {
   await pool.end();
 }
-if (failed) process.exitCode = 1;
+if (summary.failed) process.exitCode = 1;

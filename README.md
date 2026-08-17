@@ -297,6 +297,14 @@ TWILIO_FROM_NUMBER=...
 
 For development, both email and phone providers can use `console`; both can also be disabled independently.
 
+#### Admin provider delivery tests
+
+Global `system_admin` users can test a configured provider-delivery path with the MCP tools `queue_test_notification` and `get_test_notification_status`. Queueing requires an exact confirmation that includes the normalized destination, such as `SEND TEST EMAIL TO admin@example.ca`.
+
+The destination is encrypted at rest and redacted in returned and audit-facing data. Every test message has a fixed prefix identifying it as a test. Each administrator may queue five new tests per rolling hour. Email tests require `EMAIL_PROVIDER`; SMS and voice tests require `NOTIFICATION_PROVIDER`.
+
+The normal notification worker sends these tests, so a new request may remain `queued` until its next poll. A `sent` status means the provider accepted the message; it does not establish inbox placement or human receipt.
+
 ### 9. No-account recipient portal
 
 With `RECIPIENT_PORTAL_ENABLED=1`, recipients can interact without a clearing-house login or ChatGPT account.
@@ -552,7 +560,7 @@ Then verify the runtime schema contract:
 npm run schema:check
 ```
 
-Current migrations extend through `015_recipient_funding_workspace.sql` and cover core persistence, authenticated workflow, NQD/payment controls, autonomous scheduling, recipient capabilities, allocation policies, DQ envelopes, review bundles, contact verification, website discovery state, recipient funding applications, reporting packages, fiscal closeout and verified email delivery.
+Current migrations extend through `016_admin_test_notifications.sql` and cover core persistence, authenticated workflow, NQD/payment controls, autonomous scheduling, recipient capabilities, allocation policies, DQ envelopes, review bundles, contact verification, website discovery state, recipient funding applications, reporting packages, fiscal closeout, verified email delivery and audited administrator provider-delivery tests.
 
 Production API/worker/portal processes should not start against a partially migrated database.
 
@@ -797,6 +805,7 @@ The CI suite covers, among other things:
 - fiscal filing closeout;
 - verified SMS/voice contact flow;
 - verified email contact flow;
+- administrator provider-delivery database smoke;
 - public and authenticated MCP protocol behavior.
 
 Live workflows also exercise current Open Canada/T3010 ingestion and public-contact source coverage. External-source smoke failures should be investigated, while repository protection is designed so core application correctness does not depend solely on the uptime of an external government service.
@@ -812,11 +821,14 @@ npm run test:allocation-policy-db
 npm run test:dq-envelope-db
 npm run test:review-bundle-db
 npm run test:verified-email-db
+npm run test:admin-notification-db
 npm run schema:check
 npm run audit:verify
 npm run smoke:t3010
 npm run smoke:dq-live
 ```
+
+The administrator notification database smoke writes and dispatches synthetic fixtures. Run it only against a disposable test database, with explicit `DATABASE_URL`, `ENCRYPTION_KEY`, and `AUDIT_HMAC_KEY` values, and acknowledge that isolation by setting `ADMIN_NOTIFICATION_DB_SMOKE_DISPOSABLE=1`. Its provider is always a local fake.
 
 ---
 

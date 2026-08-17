@@ -71,6 +71,13 @@ jobs:
           ENCRYPTION_KEY: eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
           AUDIT_HMAC_KEY: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
         run: npm run schema:check
+      - name: Admin provider-delivery test database smoke
+        env:
+          DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/clearing_house_test
+          ENCRYPTION_KEY: eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+          AUDIT_HMAC_KEY: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+          ADMIN_NOTIFICATION_DB_SMOKE_DISPOSABLE: "1"
+        run: npm run test:admin-notification-db
       - name: Workflow database end-to-end smoke
         env: *db-env
         run: npm run test:db

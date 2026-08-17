@@ -1,7 +1,9 @@
+import crypto from 'node:crypto';
 import { withTransaction } from './pool.mjs';
 import { buildAuditEntry, payloadDigest } from '../security/audit.mjs';
 import { transitionGrant, GRANT_STATES } from '../workflow/grant_lifecycle.mjs';
-import { encryptText } from '../security/crypto.mjs';
+import { decryptText, encryptText } from '../security/crypto.mjs';
+import { maskTestDestination } from '../workflow/test_notifications.mjs';
 
 function normalizeBn(value) {
   return String(value || '').toUpperCase().replace(/[\s-]/g, '');
@@ -448,16 +450,92 @@ export class WorkflowRepository {
     });
   }
 
-  async claimQueuedNotifications(limit = 25, lockToken) {
+  redactTestNotification(row) {
+    const destination = decryptText(row.recipient, this.encryptionKey);
+    return {
+      id: row.id,
+      channel: row.channel,
+      destination: maskTestDestination(row.channel, destination),
+      subject: row.subject || '',
+      status: row.status,
+      attempts: Number(row.attempts || 0),
+      retryLimit: 3,
+      createdAt: row.created_at?.toISOString?.() || row.created_at,
+      sentAt: row.sent_at?.toISOString?.() || row.sent_at || null,
+      providerMessageId: row.provider_message_id || null,
+      lastError: row.last_error || null
+    };
+  }
+
+  async queueTestNotification({ actor, notification, idempotencyKey }) {
+    return withTransaction(this.pool, async client => {
+      await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`admin-test:${actor.id}`]);
+      const storedKey = `admin-test:${actor.id}:${idempotencyKey}`;
+      const requestSignature = crypto.createHmac('sha256', this.auditHmacKey)
+        .update('admin-test-notification-request:v1\0')
+        .update(notification.requestDigest)
+        .digest('hex');
+      const existing = (await client.query(
+        "SELECT * FROM notification_outbox WHERE template='admin_test' AND idempotency_key=$1",
+        [storedKey]
+      )).rows[0];
+      if (existing) {
+        if (existing.payload?.requestSignature !== requestSignature) {
+          throw new Error('Idempotency key was already used for different test notification semantics.');
+        }
+        return this.redactTestNotification(existing);
+      }
+      const recent = Number((await client.query(
+        "SELECT count(*) AS n FROM notification_outbox WHERE template='admin_test' AND created_by=$1 AND created_at > now()-interval '1 hour'",
+        [actor.id]
+      )).rows[0].n);
+      if (recent >= 5) throw new Error('An administrator may queue at most five test notifications per hour.');
+      const encrypted = encryptText(notification.destination, this.encryptionKey);
+      const auditRequestId = `admin-test:${crypto.createHmac('sha256', this.auditHmacKey).update(storedKey).digest('hex')}`;
+      const row = (await client.query(`
+        INSERT INTO notification_outbox
+          (grant_id,channel,recipient,template,payload,subject,idempotency_key,created_by)
+        VALUES (NULL,$1,$2,'admin_test',$3::jsonb,$4,$5,$6)
+        RETURNING *
+      `, [notification.channel, encrypted, JSON.stringify({
+        message: notification.message,
+        requestSignature
+      }), notification.subject || null, storedKey, actor.id])).rows[0];
+      await this.#appendAudit(client, {
+        actor,
+        organizationId: null,
+        action: 'notification.test_queued',
+        resourceType: 'notification',
+        resourceId: row.id,
+        requestId: auditRequestId,
+        payload: { channel: notification.channel, template: 'admin_test' }
+      });
+      return this.redactTestNotification(row);
+    });
+  }
+
+  async getTestNotificationStatus({ actor, notificationId }) {
+    const { rows } = await this.pool.query(`
+      SELECT * FROM notification_outbox
+      WHERE id=$1 AND template='admin_test' AND created_by=$2
+    `, [notificationId, actor.id]);
+    if (!rows[0]) throw new Error('Test notification not found.');
+    return this.redactTestNotification(rows[0]);
+  }
+
+  async claimQueuedNotifications(limit = 25, lockToken, { channels = ['email', 'sms', 'voice'], notificationIds = null } = {}) {
     if (!lockToken) throw new Error('lockToken is required.');
+    if (!channels.length || (Array.isArray(notificationIds) && !notificationIds.length)) return [];
     return withTransaction(this.pool, async client => {
       const selected = await client.query(`
         SELECT id FROM notification_outbox
         WHERE status='queued' AND (locked_at IS NULL OR locked_at < now() - interval '5 minutes')
+          AND channel = ANY($2::text[])
+          AND ($3::uuid[] IS NULL OR id = ANY($3::uuid[]))
         ORDER BY created_at ASC
         FOR UPDATE SKIP LOCKED
         LIMIT $1
-      `, [Math.min(Math.max(limit, 1), 100)]);
+      `, [Math.min(Math.max(limit, 1), 100), channels, notificationIds]);
       if (!selected.rows.length) return [];
       const ids = selected.rows.map(row => row.id);
       const { rows } = await client.query(`
@@ -473,7 +551,7 @@ export class WorkflowRepository {
       const current = await client.query(`SELECT n.*, g.foundation_org_id FROM notification_outbox n LEFT JOIN grants g ON g.id=n.grant_id WHERE n.id=$1 FOR UPDATE OF n`, [notificationId]);
       if (!current.rows[0] || current.rows[0].status !== 'queued' || current.rows[0].lock_token !== lockToken) return null;
       const { rows } = await client.query(`
-        UPDATE notification_outbox SET status='sent', provider_message_id=$2, sent_at=now(), locked_at=NULL, lock_token=NULL
+        UPDATE notification_outbox SET status='sent', provider_message_id=$2, sent_at=now(), last_error=NULL, locked_at=NULL, lock_token=NULL
         WHERE id=$1 RETURNING *
       `, [notificationId, providerMessageId || null]);
       await this.#appendAudit(client, {
@@ -489,14 +567,23 @@ export class WorkflowRepository {
       const current = await client.query(`SELECT n.*, g.foundation_org_id FROM notification_outbox n LEFT JOIN grants g ON g.id=n.grant_id WHERE n.id=$1 FOR UPDATE OF n`, [notificationId]);
       if (!current.rows[0] || current.rows[0].status !== 'queued' || current.rows[0].lock_token !== lockToken) return null;
       const nextStatus = retry ? 'queued' : 'failed';
+      let error = String(errorMessage);
+      let destination = String(current.rows[0].recipient || '');
+      try {
+        destination = decryptText(destination, this.encryptionKey);
+      } catch {
+        // Retain the stored value as a redaction candidate for legacy plaintext rows.
+      }
+      if (destination) error = error.split(destination).join('[redacted-destination]');
+      error = error.slice(0, 1000);
       const { rows } = await client.query(`
-        UPDATE notification_outbox SET status=$2, payload = payload || $3::jsonb, locked_at=NULL, lock_token=NULL
+        UPDATE notification_outbox SET status=$2, last_error=$3, locked_at=NULL, lock_token=NULL
         WHERE id=$1 RETURNING *
-      `, [notificationId, nextStatus, JSON.stringify({ deliveryError: String(errorMessage).slice(0, 1000) })]);
+      `, [notificationId, nextStatus, error]);
       await this.#appendAudit(client, {
         actor: null, organizationId: current.rows[0].foundation_org_id, action: retry ? 'notification.retry' : 'notification.failed',
         resourceType: 'notification', resourceId: notificationId, requestId: lockToken,
-        payload: { error: String(errorMessage).slice(0, 1000), retry }
+        payload: { retry }
       });
       return rows[0];
     });

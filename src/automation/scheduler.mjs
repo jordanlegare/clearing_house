@@ -2,6 +2,7 @@ import { withTransaction } from '../db/pool.mjs';
 
 export function jobDefinitions(config) {
   const enabled = Boolean(config.automationEnabled);
+  const notificationsConfigured = config.notificationProvider !== 'disabled' || config.emailProvider !== 'disabled';
   return [
     {
       name: 'allocation_policies',
@@ -17,7 +18,7 @@ export function jobDefinitions(config) {
     },
     {
       name: 'offer_batches',
-      enabled: enabled && config.enableWorkflowWrites && config.recipientPortalEnabled && config.notificationProvider !== 'disabled',
+      enabled: enabled && config.enableWorkflowWrites && config.recipientPortalEnabled && notificationsConfigured,
       intervalSeconds: config.notificationPollSeconds,
       metadata: { purpose: 'Advance approved review bundles through verified recipient contact discovery and grant offering without bypassing recipient consent.' }
     },
@@ -29,7 +30,7 @@ export function jobDefinitions(config) {
     },
     {
       name: 'notifications',
-      enabled: enabled && config.notificationProvider !== 'disabled',
+      enabled: enabled && notificationsConfigured,
       intervalSeconds: config.notificationPollSeconds,
       metadata: { purpose: 'Dispatch and retry queued recipient notifications.' }
     },
