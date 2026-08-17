@@ -14,7 +14,7 @@ test('authenticated workflow exposes explicit, permission-separable MCP actions'
     'suggest_dq_allocation_envelope','create_dq_backed_allocation_policy','get_dq_policy_basis',
     'get_allocation_policy_execution_options','set_allocation_policy_execution_options',
     'list_grant_review_bundles','get_grant_review_bundle','approve_grant_review_bundle',
-    'claim_recipient_organization','claim_foundation_organization','verify_organization_claim',
+    'claim_recipient_organization','claim_nonprofit_venture','claim_foundation_organization','verify_organization_claim',
     'grant_organization_role','create_grant','propose_grant','approve_grant','offer_grant','accept_grant',
     'check_cra_public_evidence','record_cra_status_verification','prepare_nqd_diligence','get_nqd_diligence',
     'approve_nqd_diligence','review_grant_compliance','record_banking_verification','create_manual_payment_intent',
@@ -49,4 +49,6 @@ test('authenticated workflow exposes explicit, permission-separable MCP actions'
   assert.equal(tools.get('create_manual_payment_intent').spec.annotations.destructiveHint, true);
   assert.equal(tools.get('authorize_manual_payment').spec.annotations.destructiveHint, true);
   assert.equal(tools.get('verify_organization_claim').spec.annotations.destructiveHint, true);
+  assert.equal(tools.get('claim_nonprofit_venture').spec.annotations.readOnlyHint, false);
+  assert.equal(tools.get('claim_nonprofit_venture').spec.annotations.destructiveHint, false);
 });

@@ -101,6 +101,10 @@ export class WorkflowRepository {
     `, [occurredAt, actor?.id || null, organizationId || null, action, resourceType, String(resourceId), requestId || null, entry.payloadDigest, entry.previousDigest, entry.entryHmac]);
   }
 
+  async appendAudit(client, args) {
+    return this.#appendAudit(client, args);
+  }
+
   async upsertActorFromClaims({ subject, email = null, displayName = null, scopes = [] }) {
     return withTransaction(this.pool, async client => {
       const userResult = await client.query(`
@@ -152,6 +156,55 @@ export class WorkflowRepository {
       RETURNING *
     `, [bn, legalName, organizationType, profile.province || null, JSON.stringify(profile)]);
     return rows[0];
+  }
+
+  async createVentureOrganizationClaim({ actor, legalName, organizationType, province, evidence = {}, idempotencyKey }) {
+    if (!actor?.id) throw new Error('Authenticated actor is required.');
+    const name = String(legalName || '').trim();
+    const type = String(organizationType || '').trim();
+    const normalizedProvince = String(province || '').trim().toUpperCase();
+    if (name.length < 2 || name.length > 500) throw new Error('Venture legal name must be between 2 and 500 characters.');
+    if (!['non_qualified_donee', 'other'].includes(type)) throw new Error('Venture organizationType must be non_qualified_donee or other.');
+    if (!/^[A-Z]{2,3}$/.test(normalizedProvince)) throw new Error('Venture province must be a two- or three-letter code.');
+    const replayKey = String(idempotencyKey || '').trim();
+    if (!replayKey) throw new Error('idempotencyKey is required.');
+
+    return withTransaction(this.pool, async client => {
+      await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`venture-claim:${replayKey}`]);
+      const existing = await client.query(`
+        SELECT c.*,o.legal_name,o.organization_type,o.province
+        FROM recipient_claims c JOIN organizations o ON o.id=c.organization_id
+        WHERE c.idempotency_key=$1 FOR UPDATE OF c
+      `, [replayKey]);
+      if (existing.rows[0]) {
+        const replay = existing.rows[0];
+        if (replay.claimed_by !== actor.id || replay.legal_name !== name
+          || replay.organization_type !== type || replay.province !== normalizedProvince) {
+          throw new Error('idempotencyKey was already used with different venture claim inputs.');
+        }
+        return replay;
+      }
+
+      const organization = (await client.query(`
+        INSERT INTO organizations (legal_name,organization_type,province,public_profile)
+        VALUES ($1,$2,$3,$4::jsonb) RETURNING *
+      `, [name, type, normalizedProvince, JSON.stringify({ claimantProvided: true })])).rows[0];
+      const claim = (await client.query(`
+        INSERT INTO recipient_claims
+          (organization_id,claimed_by,status,evidence,idempotency_key,requested_role)
+        VALUES ($1,$2,'pending',$3::jsonb,$4,'recipient_admin') RETURNING *
+      `, [organization.id, actor.id, JSON.stringify(evidence || {}), replayKey])).rows[0];
+      await this.#appendAudit(client, {
+        actor,
+        organizationId: organization.id,
+        action: 'recipient_claim.create_venture',
+        resourceType: 'recipient_claim',
+        resourceId: claim.id,
+        requestId: replayKey,
+        payload: { legalName: name, organizationType: type, province: normalizedProvince, evidence }
+      });
+      return claim;
+    });
   }
 
   async createOrganizationClaim({ actor, organizationId, requestedRole, evidence = {}, idempotencyKey }) {

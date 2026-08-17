@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { registerPortfolioTools } from './portfolio_tools.mjs';
+import { registerApplicationTools } from './application_tools.mjs';
 import {
   approveNqdDiligence,
   createManualPaymentIntent,
@@ -42,6 +43,7 @@ export function registerWorkflowTools(server, { service, actor }) {
   }, async ({ grantId }) => result('Returned grant workflow record.', { grant: await service.getGrant(actor, grantId) }));
 
   registerPortfolioTools(server, { service, actor });
+  registerApplicationTools(server, { workspace: service.recipientFunding, actor });
 
   server.registerTool('claim_recipient_organization', {
     title: 'Claim a registered charity profile',
@@ -58,6 +60,20 @@ export function registerWorkflowTools(server, { service, actor }) {
     description: 'Create a pending claim linking the authenticated user to a public/private foundation found in the loaded CRA T3010 data. A verified claim grants foundation_analyst only; approval/payment roles require a separate admin grant.',
     inputSchema: { businessNumber: z.string().min(9).max(20), evidence: boundedEvidence.default({}), idempotencyKey }, annotations: write
   }, async args => result('Created or returned the pending foundation claim. No foundation access was granted yet.', { claim: await service.claimFoundationOrganization(actor, args) }));
+
+  server.registerTool('claim_nonprofit_venture', {
+    title: 'Claim a non-qualified or non-lucrative venture',
+    description: 'Create a new non-qualified-donee or other venture record and a pending recipient-admin claim. Independent system-admin verification is required before access is granted.',
+    inputSchema: {
+      legalName: z.string().min(2).max(500),
+      organizationType: z.enum(['non_qualified_donee', 'other']),
+      province: z.string().regex(/^[A-Za-z]{2,3}$/),
+      evidence: boundedEvidence.default({}),
+      idempotencyKey
+    }, annotations: write
+  }, async args => result('Created or returned the pending venture claim. No recipient access was granted yet.', {
+    claim: await service.claimNonprofitVenture(actor, args)
+  }));
 
   server.registerTool('verify_organization_claim', {
     title: 'Verify organization claim',

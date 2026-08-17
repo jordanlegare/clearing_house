@@ -37,6 +37,19 @@ foundation has allocable capital / DQ planning need
   → filing reconciliation + audit trail
 ```
 
+It also supports a recipient-first path when a foundation still requires an application:
+
+```text
+recipient-approved organization profile + funding request
+  → transparent foundation screening from T3010/historical evidence
+  → grounded foundation-specific package + missing-fact checklist
+  → recipient confirms the unchanged package is ready
+  → recipient files through the foundation's external channel
+  → clearing house records the external reference and outcome
+```
+
+The two paths share evidence and controls. Historical support is a screening signal—not a current grant budget—and every recipient remains responsible for verifying current guidelines, eligibility, geography, deadlines, agreements and reporting requirements.
+
 A recipient does **not** need a ChatGPT account to verify a contact channel or respond to a grant offer.
 
 ## What it is not
@@ -174,7 +187,30 @@ The plan hash proves that the supplied plan has not changed. It is **not** evide
 
 Materializing a portfolio creates **draft grants only**.
 
-### 4. Autonomous allocation policies
+### 4. Recipient-first application workspace
+
+Verified recipient administrators can store a reusable, versioned funding profile and describe a project or operating request once. This works for registered charities and for non-qualified/non-lucrative ventures after an administrator independently verifies the venture claim.
+
+ChatGPT can then:
+
+- rank foundations using transparent overlap with recipient-approved facts and filing-derived evidence;
+- show the shared evidence terms, source vintage and support signal when it is published;
+- prepare a deterministic foundation-specific package;
+- return exact missing-information findings instead of inventing facts;
+- hash-bind the organization, request, target foundation, sources and readiness findings;
+- record an external submission reference and recipient-reported outcome.
+
+The lifecycle is:
+
+```text
+draft → ready → submitted → awarded | declined | withdrawn
+```
+
+`ready` requires an unchanged package hash and exact recipient confirmation. `submitted` requires a channel, external reference and timestamp. An `awarded` outcome records what the recipient reports; it does not create a foundation-side grant, approve payment or prove that funds moved.
+
+Profiles and applications are private organization-scoped workflow data. Updating a profile or request never rewrites an existing application snapshot; prepare a new draft when source facts change.
+
+### 5. Autonomous allocation policies
 
 A foundation can establish a bounded fiscal/annual allocation policy once. The worker can then keep the approved planning envelope populated with drafts, avoid duplicate recipients, and replace declined recipients when capacity reopens.
 
@@ -182,7 +218,7 @@ Optional auto-proposal can move policy-created drafts into proposal state and as
 
 The worker cannot approve its own proposals.
 
-### 5. Batch review with separation of duties
+### 6. Batch review with separation of duties
 
 A foundation analyst can prepare a hash-bound review bundle containing multiple proposed grants. A **different authorized foundation approver** can approve the immutable bundle in one action.
 
@@ -190,7 +226,7 @@ This collapses dozens of repetitive approvals into one review without removing t
 
 Bundle approval does not imply recipient acceptance, compliance approval or payment authorization.
 
-### 6. Verified recipient contact discovery
+### 7. Verified recipient contact discovery
 
 Public contact information is treated only as **candidate evidence**.
 
@@ -212,7 +248,7 @@ Website discovery is constrained by:
 
 Discovered phone numbers and email addresses are normalized, fingerprinted and encrypted at rest. Discovery never marks a destination verified.
 
-### 7. Email, SMS and voice verification/delivery
+### 8. Email, SMS and voice verification/delivery
 
 Supported recipient channels are:
 
@@ -261,7 +297,7 @@ TWILIO_FROM_NUMBER=...
 
 For development, both email and phone providers can use `console`; both can also be disabled independently.
 
-### 8. No-account recipient portal
+### 9. No-account recipient portal
 
 With `RECIPIENT_PORTAL_ENABLED=1`, recipients can interact without a clearing-house login or ChatGPT account.
 
@@ -284,7 +320,7 @@ Once a grant is approved and a verified contact exists:
 
 The portal sends defensive headers including `Cache-Control: no-store`, `Referrer-Policy: no-referrer`, CSP, frame restrictions and content-type protections. Terms are rendered as escaped text rather than trusted HTML.
 
-### 9. Current charity-status evidence
+### 10. Current charity-status evidence
 
 Annual T3010 data is not treated as a release-time legal-status guarantee.
 
@@ -294,7 +330,7 @@ Before payment authorization, an authorized reviewer records a current observati
 
 The repository deliberately does not scrape an undocumented CRA application endpoint and present the result as an authoritative API determination.
 
-### 10. NQD diligence and compliance
+### 11. NQD diligence and compliance
 
 Non-qualified-donee grants have a separate proportional diligence workflow. Preparation and approval are separated, and compliance approval remains an explicit authorized action.
 
@@ -302,7 +338,7 @@ The reporting classifier aggregates NQD grants by grantee over the fiscal period
 
 This software is compliance support, not legal advice; operators remain responsible for validating current CRA requirements before production filing.
 
-### 11. Banking verification and payment boundary
+### 12. Banking verification and payment boundary
 
 Banking evidence is represented only by encrypted external verification references. Raw bank-account/card coordinates are not part of the baseline application data model.
 
@@ -322,7 +358,7 @@ recipient accepted terms
 
 The application can record that an externally executed payment occurred and store its external reference. It does not send the money itself.
 
-### 12. Fiscal reporting packages and closeout
+### 13. Fiscal reporting packages and closeout
 
 Paid grants can be reconciled into deterministic fiscal-period reporting packages containing the grant-ledger facts needed for T3010-related review, including qualified-donee and NQD routing.
 
@@ -341,7 +377,7 @@ prepare frozen fiscal package
 
 The application never invents an external CRA filing reference and never claims CRA accepted or validated the filing.
 
-### 13. Autonomous operations and recovery
+### 14. Autonomous operations and recovery
 
 The autonomous worker uses PostgreSQL-backed schedules, leases and heartbeats so multiple replicas can compete safely.
 
@@ -365,7 +401,7 @@ Long-running jobs renew leases. Stale leases can be recovered by another worker 
 
 The worker does **not** silently approve grants, approve NQD diligence, manufacture authoritative charity status, authorize both sides of a payment, execute bank transfers, or claim a CRA filing was submitted.
 
-### 14. Operational status
+### 15. Operational status
 
 Authorized operators can query an organization-scoped operational status surface to see where attention is required, including areas such as:
 
@@ -443,6 +479,9 @@ Authenticated mode adds permission-scoped tools covering:
 
 - identity / role inspection;
 - organization claims and verified role grants;
+- recipient funding profiles and reusable funding requests;
+- recipient-to-foundation screening and hash-bound application packages;
+- recipient-controlled application readiness, external submission evidence and outcomes;
 - grant creation, proposal and approval;
 - portfolio planning and draft materialization;
 - autonomous allocation-policy configuration;
@@ -513,7 +552,7 @@ Then verify the runtime schema contract:
 npm run schema:check
 ```
 
-Current migrations extend through `014_verified_email_contacts.sql` and cover core persistence, authenticated workflow, NQD/payment controls, autonomous scheduling, recipient capabilities, allocation policies, DQ envelopes, review bundles, contact verification, website discovery state, reporting packages, fiscal closeout and verified email delivery.
+Current migrations extend through `015_recipient_funding_workspace.sql` and cover core persistence, authenticated workflow, NQD/payment controls, autonomous scheduling, recipient capabilities, allocation policies, DQ envelopes, review bundles, contact verification, website discovery state, recipient funding applications, reporting packages, fiscal closeout and verified email delivery.
 
 Production API/worker/portal processes should not start against a partially migrated database.
 
@@ -821,6 +860,7 @@ The application code cannot supply these on its own:
 - qualified legal/compliance review for NQD workflows;
 - external banking verification;
 - bank/payment execution;
+- final submission through each foundation's external application channel;
 - final CRA/certified-software filing.
 
 Those are deliberate institutional boundaries, not unfinished placeholders to be silently automated.
@@ -843,7 +883,8 @@ Key implementation areas:
 ```text
 src/t3010/          public-data discovery, parsing and repository
 src/matching/       transparent recipient scoring / portfolio logic
-src/workflow/       grant, contact, offer, DQ and review workflows
+src/applications/   deterministic recipient application packages and lifecycle
+src/workflow/       grant, application, contact, offer, DQ and review workflows
 src/automation/     durable scheduler and autonomous jobs
 src/compliance/     status, reporting, fiscal package and closeout
 src/integrations/   notification, website enrichment and payment boundaries
@@ -869,7 +910,8 @@ foundation / authorized humans:
   approve → review compliance/status → authorize payment → file externally
 
 recipient:
-  verify contact → review terms → accept or decline
+  maintain approved facts → prepare/file applications externally → record outcomes
+  → verify contact → review terms → accept or decline
 ```
 
 That boundary is the central design constraint of the Canadian Philanthropy Clearing House.

@@ -2,6 +2,7 @@ import { GRANT_STATES } from './grant_lifecycle.mjs';
 import { PERMISSIONS, ROLES, requireGlobalRole, requireOrgPermission, scopedActor } from '../security/rbac.mjs';
 import { classifyGrantReporting, RECIPIENT_TYPES } from '../compliance/reporting.mjs';
 import { CRA_LIST_URL, normalizeCraObservedStatus } from '../compliance/status_verifier.mjs';
+import { RecipientFundingWorkspace } from './recipient_funding_workspace.mjs';
 
 function requireActor(actor) {
   if (!actor?.id) throw new Error('Authentication is required for workflow tools.');
@@ -16,6 +17,7 @@ export class WorkflowService {
     this.repository = repository;
     this.t3010Repository = t3010Repository;
     this.config = config;
+    this.recipientFunding = new RecipientFundingWorkspace({ repository, t3010Repository });
   }
 
   whoami(actor) {
@@ -60,6 +62,14 @@ export class WorkflowService {
     if (!profile) throw new Error('Business number was not found in the loaded foundation T3010 dataset.');
     const organization = await this.repository.upsertPublicOrganization(profile, 'foundation');
     return this.repository.createOrganizationClaim({ actor, organizationId: organization.id, requestedRole: ROLES.FOUNDATION_ANALYST, evidence: { ...evidence, businessNumber: bn }, idempotencyKey });
+  }
+
+  async claimNonprofitVenture(actor, args) {
+    requireActor(actor);
+    if (!['non_qualified_donee', 'other'].includes(args.organizationType)) {
+      throw new Error('organizationType must be non_qualified_donee or other.');
+    }
+    return this.repository.createVentureOrganizationClaim({ actor, ...args });
   }
 
   async grantOrganizationRole(actor, args) {

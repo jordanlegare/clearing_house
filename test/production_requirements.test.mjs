@@ -7,6 +7,7 @@ import { RECIPIENT_TYPES, classifyGrantReporting } from '../src/compliance/repor
 import { DisabledPaymentAdapter, ManualPaymentAdapter } from '../src/integrations/payment.mjs';
 import { encryptText, decryptText } from '../src/security/crypto.mjs';
 import { isReleaseEligibleStatusCheck, normalizeCraObservedStatus } from '../src/compliance/status_verifier.mjs';
+import { REQUIRED_SCHEMA_OBJECTS } from '../src/db/schema_readiness.mjs';
 
 const analyst = { id: 'u-analyst', roles: [ROLES.FOUNDATION_ANALYST], organizationId: 'f-1' };
 const approver = { id: 'u-approver', roles: [ROLES.FOUNDATION_APPROVER], organizationId: 'f-1' };
@@ -44,6 +45,23 @@ test('rbac separates proposal, approval, recipient consent and payment permissio
   assert.equal(hasPermission(analyst.roles, PERMISSIONS.APPROVE_GRANT), false);
   assert.equal(hasPermission(recipient.roles, PERMISSIONS.ACCEPT_GRANT), true);
   assert.equal(hasPermission(payment.roles, PERMISSIONS.AUTHORIZE_PAYMENT), true);
+});
+
+test('recipient funding permissions stay with recipient administrators', () => {
+  assert.equal(hasPermission(recipient.roles, PERMISSIONS.MANAGE_RECIPIENT_FUNDING), true);
+  assert.equal(hasPermission(recipient.roles, PERMISSIONS.SUBMIT_RECIPIENT_APPLICATION), true);
+  assert.equal(hasPermission(analyst.roles, PERMISSIONS.MANAGE_RECIPIENT_FUNDING), false);
+  assert.equal(hasPermission(analyst.roles, PERMISSIONS.SUBMIT_RECIPIENT_APPLICATION), false);
+});
+
+test('database readiness requires the recipient funding workspace', () => {
+  for (const table of [
+    'recipient_funding_profiles',
+    'recipient_funding_requests',
+    'grant_applications',
+    'grant_application_events',
+    'recipient_funding_operations'
+  ]) assert.equal(REQUIRED_SCHEMA_OBJECTS.includes(table), true, `missing required schema table ${table}`);
 });
 
 test('organization-scoped roles do not leak between foundations', () => {

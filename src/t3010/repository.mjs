@@ -16,12 +16,45 @@ function recordText(record) {
   return [record.name, ...Object.values(record.fields ?? {})].filter(Boolean).join(' ');
 }
 
+function evidenceRecordForTerm(sourceKind, record, term) {
+  const sourceText = recordText(record).trim();
+  if (!sourceText) return null;
+  let termIndex = -1;
+  for (const match of sourceText.matchAll(/[\p{L}\p{N}]+/gu)) {
+    const normalized = match[0].toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '');
+    if (normalized === term) {
+      termIndex = match.index;
+      break;
+    }
+  }
+  if (termIndex < 0) return null;
+  const start = Math.max(0, termIndex - 500);
+  const excerpt = sourceText.slice(start, start + 1_000);
+  return {
+    sourceKind,
+    sourceResourceId: record.sourceResourceId ?? '',
+    sourceUrl: record.sourceUrl ?? '',
+    rowNumber: record.rowNumber == null ? null : (Number.isSafeInteger(Number(record.rowNumber)) ? Number(record.rowNumber) : null),
+    excerpt,
+    matchedTerms: [term]
+  };
+}
+
 function scoreText(queryTokens, text) {
   if (!queryTokens.length) return 0;
   const hay = new Set(tokens(text));
   let hits = 0;
   for (const token of queryTokens) if (hay.has(token)) hits += 1;
   return hits / queryTokens.length;
+}
+
+function supportSignal(profile) {
+  const candidates = [
+    profile?.financialSignals?.giftsToQualifiedDonees,
+    profile?.financialSignals?.grantsToNonQualifiedDonees,
+    profile?.financialSignals?.charitableProgramExpenditures
+  ].filter(value => Number.isFinite(value));
+  return candidates.length ? Math.max(...candidates) : null;
 }
 
 async function readJsonl(file) {
@@ -212,11 +245,87 @@ export class T3010Repository {
     return results.sort((a,b) => b.score - a.score || a.name.localeCompare(b.name)).slice(0, limit);
   }
 
+  matchRecipientFoundations({
+    profileText = '',
+    requestText = '',
+    province = '',
+    limit = 25,
+    minimumSupportSignalCad = 0
+  } = {}) {
+    const queryTerms = tokens(`${profileText} ${requestText}`).slice(0, 100);
+    const requestedProvince = String(province ?? '').trim().toUpperCase();
+    const resultLimit = Math.min(Math.max(Number(limit) || 25, 1), 100);
+    const minimumSupport = Number(minimumSupportSignalCad);
+    if (!Number.isFinite(minimumSupport) || minimumSupport < 0) {
+      throw new Error('minimumSupportSignalCad must be a finite non-negative amount.');
+    }
+
+    const matches = [];
+    for (const [bn, foundationRow] of this.foundationByBn) {
+      const profile = this.foundationProfile(bn);
+      if (!profile) continue;
+      if (requestedProvince && profile.province !== requestedProvince) continue;
+
+      const historicalRows = this.qualifiedDoneesByBn.get(bn) ?? [];
+      const sourceRecords = [
+        ['identification', this.identByBn.get(bn)],
+        ['foundation_schedule', foundationRow],
+        ...(this.programsByBn.get(bn) ?? []).map(record => ['charitable_program', record]),
+        ...historicalRows.slice(0, 200).map(record => ['historical_qualified_donee', record])
+      ];
+      const foundationEvidenceText = sourceRecords.map(([, record]) => recordText(record)).join(' ');
+      const evidenceTerms = new Set(tokens(foundationEvidenceText));
+      const matchedTerms = queryTerms.filter(term => evidenceTerms.has(term)).sort();
+      if (queryTerms.length && !matchedTerms.length) continue;
+
+      const supportSignalCad = supportSignal(profile);
+      if (supportSignalCad != null && supportSignalCad < minimumSupport) continue;
+      const score = queryTerms.length ? matchedTerms.length / queryTerms.length : 0.01;
+      matches.push({
+        bn,
+        name: profile.name,
+        province: profile.province,
+        sourceYear: profile.sourceYear,
+        designation: profile.designation,
+        supportSignalCad,
+        score: Number(score.toFixed(4)),
+        matchedTerms,
+        rationale: matchedTerms.length
+          ? `Shared filing-evidence terms: ${matchedTerms.join(', ')}`
+          : 'No query terms were supplied; review the filing evidence manually.',
+        evidence: {
+          supportingEvidence: matchedTerms.map(term => {
+            for (const [sourceKind, record] of sourceRecords) {
+              const evidence = evidenceRecordForTerm(sourceKind, record, term);
+              if (evidence) return evidence;
+            }
+            return null;
+          }).filter(Boolean),
+          programDescriptions: profile.programDescriptions,
+          historicalQualifiedDoneeRowCount: historicalRows.length,
+          financialSignalEvidence: profile.financialSignalEvidence,
+          supportSignalDefinition: 'Maximum of gifts to qualified donees, grants to non-qualified donees, and charitable-program expenditures when published.'
+        }
+      });
+    }
+
+    matches.sort((a, b) => b.score - a.score || a.bn.localeCompare(b.bn));
+    return {
+      queryTerms,
+      screeningOnly: true,
+      warnings: [
+        'Historical support evidence is not a current grant budget.',
+        'Verify current guidelines, recipient eligibility, geography, deadlines, application channel, agreements and reporting requirements.'
+      ],
+      matches: matches.slice(0, resultLimit)
+    };
+  }
+
   matchFoundation({ foundationBn, focus = '', province = '', limit = 25 } = {}) {
     const foundation = this.foundationProfile(foundationBn);
     if (!foundation) throw new Error(`Foundation ${foundationBn} not found in loaded T3010 foundation records`);
     const evidence = [focus, foundation.name, ...foundation.programDescriptions, ...(this.qualifiedDoneesByBn.get(foundationBn) ?? []).slice(0, 200).map(recordText)].join(' ');
-    const q = tokens(evidence).slice(0, 120);
+    const q = tokens(evidence).slice(0, 100);
     if (!q.length) return { foundation, confidence: 'low', evidenceTokens: [], matches: [], explanation: 'No textual mandate or historical grant evidence was available; supply a focus phrase.' };
     const candidates = this.searchCharities({ query: q.join(' '), province, limit: Math.max(limit * 5, 100), includeFoundations: false });
     const matches = candidates.slice(0, limit).map(candidate => {
