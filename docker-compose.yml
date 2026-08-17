@@ -1,6 +1,65 @@
 services:
+  keycloak-db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: keycloak
+      POSTGRES_USER: keycloak
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - keycloak-postgres-data:/var/lib/postgresql/data
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.7.0
+    restart: unless-stopped
+    command:
+      - start
+      - --hostname=https://auth.clears.to
+      - --http-enabled=true
+      - --proxy-headers=xforwarded
+    depends_on:
+      - keycloak-db
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://keycloak-db:5432/keycloak
+      KC_DB_USERNAME: keycloak
+      KC_DB_PASSWORD: ${KC_DB_PASSWORD}
+
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KC_BOOTSTRAP_ADMIN_PASSWORD}
+
+      KC_HEALTH_ENABLED: "true"
+      KC_METRICS_ENABLED: "true"
+
+    ports:
+      - "127.0.0.1:8080:8080"
+
   postgres:
     image: postgres:16
+    command:
+      - postgres
+      - -c
+      - shared_buffers=4GB
+      - -c
+      - effective_cache_size=12GB
+      - -c
+      - work_mem=16MB
+      - -c
+      - maintenance_work_mem=512MB
+      - -c
+      - max_connections=60
+      - -c
+      - checkpoint_completion_target=0.9
+      - -c
+      - max_wal_size=4GB
+      - -c
+      - min_wal_size=1GB
+      - -c
+      - wal_compression=on
+      - -c
+      - effective_io_concurrency=200
+      - -c
+      - log_min_duration_statement=1000
     restart: unless-stopped
     environment:
       POSTGRES_DB: clearing_house
@@ -48,7 +107,7 @@ services:
       schema-check:
         condition: service_completed_successfully
     ports:
-      - "${PORT:-3000}:3000"
+      - "127.0.0.1:${PORT:-3000}:3000"
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 30s
@@ -123,7 +182,7 @@ services:
       schema-check:
         condition: service_completed_successfully
     ports:
-      - "${RECIPIENT_PORTAL_PORT:-3001}:3001"
+      - "127.0.0.1:${RECIPIENT_PORTAL_PORT:-3001}:3001"
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 30s
@@ -135,6 +194,12 @@ services:
       RECIPIENT_PORTAL_ENABLED: "1"
       RECIPIENT_PORTAL_PORT: 3001
 
+networks:
+  default:
+    name: clearing-house-backend
+    driver: bridge
+
 volumes:
   postgres-data:
   t3010-data:
+  keycloak-postgres-data:
