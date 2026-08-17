@@ -192,11 +192,13 @@ function registerPublicTools(server) {
 }
 
 function createMcpServer(actor) {
-  const server = new McpServer({ name: 'canadian-philanthropy-clearing-house', version: '0.4.0' }, {
+  const server = new McpServer({ name: 'canadian-philanthropy-clearing-house', version: '0.17.0' }, {
     instructions: [
       'Use CRA T3010/Open Government data for public discovery and the authenticated workflow tools for grant administration.',
       'Treat annual T3010 data as public filing evidence, not current legal-status verification.',
       'Never imply that a match is an award or that CRA approved a transaction.',
+      'Treat reverse foundation matches as screening evidence, not current eligibility or grant-budget evidence.',
+      'A recipient application is not submitted until a recipient records an external channel, reference and timestamp; recorded outcomes do not create grants.',
       'Never imply a payment occurred unless an external payment reference has been recorded.',
       'Authenticated write tools enforce organization-scoped RBAC, separation of duties, recipient consent, authoritative status verification and compliance gates.',
       'CRA reporting records are preparation artifacts and do not mean a filing was submitted or accepted.'

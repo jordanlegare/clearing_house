@@ -55,6 +55,19 @@ Controls:
 - Recording `paid` requires an external payment reference.
 - Recording `reported` requires a reporting record.
 
+### Recipient application workflow
+
+- Registered charities require a verified T3010-backed organization claim before recipient funding data can be managed.
+- A non-qualified/non-lucrative venture claim creates no access until a system administrator independently verifies authority.
+- Recipient profiles, funding requests and applications are private organization-scoped data.
+- Reverse foundation matching exposes its filing-derived evidence and never represents historical support as a current grant budget.
+- Application packages are deterministic and bind the recipient profile version, request version, foundation BN/source vintage, amount, evidence and readiness findings with a SHA-256 hash.
+- Missing facts produce readiness findings; neither ChatGPT nor the service fills them with invented content.
+- Marking an application ready requires recipient-admin authority, a matching package hash, no unresolved readiness findings and exact confirmation.
+- Recording submission requires a recipient-provided external channel, reference and timestamp. The application does not log in to or scrape foundation portals.
+- Recording an awarded outcome does not create a `grants` row, approve payment or prove that funds moved.
+- Changed source facts require a new application draft; stored application snapshots remain immutable.
+
 ### Compliance and CRA reporting
 
 - The system must distinguish gifts/qualifying disbursements to qualified donees from grants to non-qualified donees.
@@ -92,6 +105,7 @@ Controls:
 - Write tools use accurate MCP annotations so ChatGPT can surface confirmation appropriately.
 - App privacy policy and operator contact information must be published before public distribution.
 - The MCP app is the integration backend; Plugin Directory packaging/publication is a separate ChatGPT distribution step.
+- Recipient application tools must describe matching as screening, readiness as non-submission, and external references as evidence rather than proof of receipt or acceptance.
 
 ## 5. Reliability requirements
 
