@@ -18,7 +18,8 @@ test('authenticated workflow exposes explicit, permission-separable MCP actions'
     'grant_organization_role','create_grant','propose_grant','approve_grant','offer_grant','accept_grant',
     'check_cra_public_evidence','record_cra_status_verification','prepare_nqd_diligence','get_nqd_diligence',
     'approve_nqd_diligence','review_grant_compliance','record_banking_verification','create_manual_payment_intent',
-    'authorize_manual_payment','record_manual_payment','prepare_reporting_record','mark_grant_reported'
+    'authorize_manual_payment','record_manual_payment','prepare_reporting_record','mark_grant_reported',
+    'queue_test_notification','get_test_notification_status'
   ]) assert.equal(tools.has(name), true, `missing ${name}`);
   assert.equal(tools.get('workflow_whoami').spec.annotations.readOnlyHint, true);
   assert.equal(tools.get('operational_status').spec.annotations.readOnlyHint, true);
@@ -51,4 +52,10 @@ test('authenticated workflow exposes explicit, permission-separable MCP actions'
   assert.equal(tools.get('verify_organization_claim').spec.annotations.destructiveHint, true);
   assert.equal(tools.get('claim_nonprofit_venture').spec.annotations.readOnlyHint, false);
   assert.equal(tools.get('claim_nonprofit_venture').spec.annotations.destructiveHint, false);
+  assert.equal(tools.get('queue_test_notification').spec.annotations.destructiveHint, true);
+  assert.equal(tools.get('queue_test_notification').spec.annotations.readOnlyHint, false);
+  assert.equal(tools.get('queue_test_notification').spec.annotations.openWorldHint, true);
+  assert.equal(tools.get('get_test_notification_status').spec.annotations.readOnlyHint, true);
+  assert.equal(tools.get('get_test_notification_status').spec.annotations.destructiveHint, false);
+  assert.equal(tools.get('get_test_notification_status').spec.annotations.openWorldHint, false);
 });

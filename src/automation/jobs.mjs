@@ -9,6 +9,7 @@ import { runOfferBatchesJob } from '../workflow/offer_batches.mjs';
 import { refreshStatusVerificationTasks } from '../workflow/status_verification_tasks.mjs';
 import { runAllocationPoliciesJob } from './allocation_policies.mjs';
 import { runReviewBundlesJob } from './review_bundle_worker.mjs';
+import { notificationDeliveryFailureSummary } from '../integrations/notification.mjs';
 
 function offerMessage(notification, access) {
   const prefix = notification.channel === 'voice'
@@ -31,24 +32,35 @@ function notificationSubject(notification) {
   return 'Canadian Philanthropy Clearing House';
 }
 
-function notificationsEnabled(config) {
+export function enabledNotificationChannels(config) {
   const phone = Boolean(config.notificationProvider && config.notificationProvider !== 'disabled');
   const email = Boolean(config.emailProvider && config.emailProvider !== 'disabled');
-  return phone || email;
+  return [
+    ...(email ? ['email'] : []),
+    ...(phone ? ['sms', 'voice'] : [])
+  ];
 }
 
-export async function dispatchNotificationsJob({ config, repository, provider }) {
-  if (!notificationsEnabled(config)) return { skipped: true, reason: 'notification_providers_disabled' };
+function redactedProviderError(error, destination) {
+  let message = notificationDeliveryFailureSummary(error);
+  if (destination) message = message.split(destination).join('[redacted-destination]');
+  return message.slice(0, 1000);
+}
+
+export async function dispatchNotificationsJob({ config, repository, provider, notificationIds = null }) {
+  const channels = enabledNotificationChannels(config);
+  if (!channels.length) return { skipped: true, reason: 'notification_providers_disabled' };
   const lockToken = crypto.randomUUID();
-  const queued = await repository.claimQueuedNotifications(config.notificationBatchSize, lockToken);
+  const queued = await repository.claimQueuedNotifications(config.notificationBatchSize, lockToken, { channels, notificationIds });
   let sent = 0;
   let failed = 0;
   let retried = 0;
   let secureOfferLinks = 0;
   let contactVerificationLinks = 0;
   for (const notification of queued) {
+    let destination = null;
     try {
-      const to = decryptText(notification.recipient, config.encryptionKey);
+      destination = decryptText(notification.recipient, config.encryptionKey);
       let body = notification.payload?.message || 'A funding offer is available for your organization.';
       if (notification.template === 'grant_offer' && config.recipientPortalEnabled) {
         if (!notification.grant_id) throw new Error('Grant-offer notification is missing grant_id.');
@@ -69,16 +81,16 @@ export async function dispatchNotificationsJob({ config, repository, provider })
       }
       const delivered = await provider.send({
         channel: notification.channel,
-        to,
+        to: destination,
         body,
         subject: notificationSubject(notification),
-        idempotencyKey: notification.idempotency_key
+        idempotencyKey: notification.template === 'admin_test' ? notification.id : notification.idempotency_key
       });
       await repository.markNotificationSent(notification.id, delivered.providerMessageId, lockToken);
       sent += 1;
     } catch (error) {
       const retry = notification.attempts < 3;
-      await repository.markNotificationFailed(notification.id, error.message, lockToken, retry);
+      await repository.markNotificationFailed(notification.id, redactedProviderError(error, destination), lockToken, retry);
       failed += 1;
       if (retry) retried += 1;
     }

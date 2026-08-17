@@ -14,6 +14,7 @@ const readOnly = { readOnlyHint: true, openWorldHint: false, destructiveHint: fa
 const openRead = { readOnlyHint: true, openWorldHint: true, destructiveHint: false };
 const write = { readOnlyHint: false, openWorldHint: false, destructiveHint: false };
 const consequential = { readOnlyHint: false, openWorldHint: false, destructiveHint: true };
+const externalConsequential = { readOnlyHint: false, openWorldHint: true, destructiveHint: true };
 
 function result(message, data = {}) {
   return { structuredContent: data, content: [{ type: 'text', text: message }] };
@@ -96,6 +97,29 @@ export function registerWorkflowTools(server, { service, actor }) {
       idempotencyKey
     }, annotations: consequential
   }, async args => result('Granted organization-scoped workflow role.', { membership: await service.grantOrganizationRole(actor, args) }));
+
+  server.registerTool('queue_test_notification', {
+    title: 'Queue provider delivery test',
+    description: 'System-admin action to queue one external email, SMS, or voice delivery test through the encrypted outbox and autonomous worker. This sends a real test message and does not create a grant.',
+    inputSchema: {
+      channel: z.enum(['email', 'sms', 'voice']),
+      destination: z.string().min(3).max(254),
+      subject: z.string().max(120).default(''),
+      message: z.string().min(1).max(500),
+      confirmation: z.string().min(1).max(500),
+      idempotencyKey
+    }, annotations: externalConsequential
+  }, async args => result('Queued the external delivery test. Poll its status before treating provider acceptance as successful.', {
+    notification: await service.queueTestNotification(actor, args)
+  }));
+
+  server.registerTool('get_test_notification_status', {
+    title: 'Get provider delivery test status',
+    description: 'System-admin read of one redacted delivery test, including attempts, provider acceptance identifier and bounded failure information.',
+    inputSchema: { notificationId: uuid }, annotations: readOnly
+  }, async ({ notificationId }) => result('Returned redacted delivery-test status.', {
+    notification: await service.getTestNotificationStatus(actor, notificationId)
+  }));
 
   server.registerTool('create_grant', {
     title: 'Create grant draft',

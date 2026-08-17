@@ -37,17 +37,24 @@ export async function checkDatabaseSchema(pool) {
       ORDER BY required.name
     `, [REQUIRED_SCHEMA_OBJECTS]);
     const missing = rows.filter(row => !row.present).map(row => row.name);
+    const requiredColumn = await pool.query(`
+      SELECT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema='public' AND table_name='notification_outbox' AND column_name='created_by'
+      ) AS present
+    `);
+    if (!requiredColumn.rows[0].present) missing.push('notification_outbox.created_by');
     return {
       ready: missing.length === 0,
       databaseReachable: true,
-      expectedObjects: REQUIRED_SCHEMA_OBJECTS.length,
+      expectedObjects: REQUIRED_SCHEMA_OBJECTS.length + 1,
       missing
     };
   } catch (error) {
     return {
       ready: false,
       databaseReachable: false,
-      expectedObjects: REQUIRED_SCHEMA_OBJECTS.length,
+      expectedObjects: REQUIRED_SCHEMA_OBJECTS.length + 1,
       missing: [],
       error: error.message
     };

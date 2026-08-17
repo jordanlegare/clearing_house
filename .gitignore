@@ -1,6 +1,7 @@
 node_modules/
 .env
 .tmp/
+.worktrees/
 coverage/
 data/t3010/*/
 !data/t3010/.gitkeep

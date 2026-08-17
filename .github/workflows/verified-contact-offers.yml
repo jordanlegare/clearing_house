@@ -32,6 +32,7 @@ jobs:
           node --check src/t3010/normalize.mjs
           node --check src/t3010/repository.mjs
           node --check src/workflow/recipient_contacts.mjs
+          node --check src/workflow/test_notifications.mjs
           node --check src/workflow/offer_batches.mjs
           node --check src/mcp/offer_tools.mjs
           node --check src/integrations/website_contact.mjs
@@ -43,6 +44,7 @@ jobs:
           node --check scripts/recipient-portal.mjs
           node --check scripts/verified-contact-offer-db-smoke.mjs
           node --check scripts/verified-email-offer-db-smoke.mjs
+          node --check scripts/admin-test-notification-db-smoke.mjs
       - name: Full unit suite
         run: npm test
       - name: Apply all PostgreSQL migrations

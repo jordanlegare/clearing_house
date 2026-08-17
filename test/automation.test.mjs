@@ -29,3 +29,39 @@ test('autonomous jobs disable external work when the parent feature is off', () 
   });
   assert.ok(jobs.every(job => job.enabled === false));
 });
+
+test('email-only delivery enables offer batches and notification dispatch', () => {
+  const jobs = jobDefinitions({
+    automationEnabled:true,
+    enableWorkflowWrites:true,
+    recipientPortalEnabled:true,
+    notificationProvider:'disabled',
+    emailProvider:'resend',
+    notificationPollSeconds:30,
+    automatedPortfoliosEnabled:false,
+    allocationPolicyPollSeconds:300,
+    enableT3010Sync:false,
+    t3010SyncIntervalHours:24
+  });
+  const byName = Object.fromEntries(jobs.map(job => [job.name, job]));
+  assert.equal(byName.notifications.enabled, true);
+  assert.equal(byName.offer_batches.enabled, true);
+});
+
+test('delivery jobs remain disabled only when both provider families are disabled', () => {
+  const jobs = jobDefinitions({
+    automationEnabled:true,
+    enableWorkflowWrites:true,
+    recipientPortalEnabled:true,
+    notificationProvider:'disabled',
+    emailProvider:'disabled',
+    notificationPollSeconds:30,
+    automatedPortfoliosEnabled:false,
+    allocationPolicyPollSeconds:300,
+    enableT3010Sync:false,
+    t3010SyncIntervalHours:24
+  });
+  const byName = Object.fromEntries(jobs.map(job => [job.name, job]));
+  assert.equal(byName.notifications.enabled, false);
+  assert.equal(byName.offer_batches.enabled, false);
+});
