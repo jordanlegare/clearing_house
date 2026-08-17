@@ -71,7 +71,17 @@ try {
           supportSignalCad: 600000,
           score: 0.75,
           matchedTerms: ['food', 'security', 'transportation'],
-          rationale: 'Shared filing-evidence terms: food, security, transportation'
+          rationale: 'Shared filing-evidence terms: food, security, transportation',
+          evidence: {
+            supportingEvidence: [{
+              sourceKind: 'charitable_program',
+              sourceResourceId: 'ci-foundation-programs',
+              sourceUrl: 'https://example.ca/ci-foundation-programs.csv',
+              rowNumber: 1,
+              excerpt: 'Food security transportation equipment',
+              matchedTerms: ['food', 'security', 'transportation']
+            }]
+          }
         }]
       };
     }
